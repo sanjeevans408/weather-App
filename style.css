@@ -737,7 +737,7 @@ select.form-control {
     format('woff2');
 }
 
-/* END PERPLEXITY DESIGN SYSTEM */
+
 /* Weather App Styles */
 body {
     margin: 0;
@@ -748,7 +748,7 @@ body {
 }
 
 #app {
-    position: relative;
+    position: absolute;
     min-height: 100vh;
 }
 
