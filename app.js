@@ -1,4 +1,4 @@
-// Universal WeatherPro JavaScript Application with Enhanced Cross-Device Compatibility
+//all device supported
 
 // Feature Detection and Polyfills for Universal Browser Support
 (function() {
