@@ -1,328 +1,577 @@
-// app.js
+// Universal WeatherPro JavaScript Application with Enhanced Cross-Device Compatibility
 
-// Utility functions for error handling and DOM manipulation
-const SafeDOM = {
-    get: (id) => {
-        try {
-            const element = document.getElementById(id);
-            if (!element) {
-                console.warn(`Element with ID '${id}' not found`);
-                return null;
+// Feature Detection and Polyfills for Universal Browser Support
+(function() {
+    'use strict';
+    
+    // Polyfill for Object.assign (IE11 support)
+    if (typeof Object.assign !== 'function') {
+        Object.assign = function(target) {
+            if (target == null) {
+                throw new TypeError('Cannot convert undefined or null to object');
             }
-            return element;
-        } catch (error) {
-            console.error(`Error getting element with ID '${id}':`, error);
-            return null;
-        }
-    },
+            var to = Object(target);
+            for (var index = 1; index < arguments.length; index++) {
+                var nextSource = arguments[index];
+                if (nextSource != null) {
+                    for (var nextKey in nextSource) {
+                        if (Object.prototype.hasOwnProperty.call(nextSource, nextKey)) {
+                            to[nextKey] = nextSource[nextKey];
+                        }
+                    }
+                }
+            }
+            return to;
+        };
+    }
+    
+    // Polyfill for Array.from (IE11 support)
+    if (!Array.from) {
+        Array.from = function(arrayLike, mapFn, thisArg) {
+            var C = this;
+            var items = Object(arrayLike);
+            if (arrayLike == null) {
+                throw new TypeError('Array.from requires an array-like object - not null or undefined');
+            }
+            var len = parseInt(items.length) || 0;
+            var A = typeof C === 'function' ? Object(new C(len)) : new Array(len);
+            var k = 0;
+            while (k < len) {
+                var kValue = items[k];
+                if (mapFn) {
+                    A[k] = typeof thisArg === 'undefined' ? mapFn(kValue, k) : mapFn.call(thisArg, kValue, k);
+                } else {
+                    A[k] = kValue;
+                }
+                k += 1;
+            }
+            A.length = len;
+            return A;
+        };
+    }
+    
+    // Polyfill for Promise (IE11 support)
+    if (typeof Promise === 'undefined') {
+        window.Promise = function(executor) {
+            var self = this;
+            self.state = 'pending';
+            self.value = undefined;
+            self.handlers = [];
+            
+            function resolve(result) {
+                if (self.state === 'pending') {
+                    self.state = 'fulfilled';
+                    self.value = result;
+                    self.handlers.forEach(handle);
+                    self.handlers = null;
+                }
+            }
+            
+            function reject(error) {
+                if (self.state === 'pending') {
+                    self.state = 'rejected';
+                    self.value = error;
+                    self.handlers.forEach(handle);
+                    self.handlers = null;
+                }
+            }
+            
+            function handle(handler) {
+                if (self.state === 'pending') {
+                    self.handlers.push(handler);
+                } else {
+                    if (self.state === 'fulfilled' && typeof handler.onFulfilled === 'function') {
+                        handler.onFulfilled(self.value);
+                    }
+                    if (self.state === 'rejected' && typeof handler.onRejected === 'function') {
+                        handler.onRejected(self.value);
+                    }
+                }
+            }
+            
+            this.then = function(onFulfilled, onRejected) {
+                return new Promise(function(resolve, reject) {
+                    handle({
+                        onFulfilled: function(result) {
+                            try {
+                                resolve(onFulfilled ? onFulfilled(result) : result);
+                            } catch (ex) {
+                                reject(ex);
+                            }
+                        },
+                        onRejected: function(error) {
+                            try {
+                                resolve(onRejected ? onRejected(error) : error);
+                            } catch (ex) {
+                                reject(ex);
+                            }
+                        }
+                    });
+                });
+            };
+            
+            executor(resolve, reject);
+        };
+    }
+    
+    // Fetch API Polyfill for older browsers
+    if (!window.fetch) {
+        window.fetch = function(url, options) {
+            return new Promise(function(resolve, reject) {
+                var xhr = new XMLHttpRequest();
+                options = options || {};
+                
+                xhr.open(options.method || 'GET', url, true);
+                
+                if (options.headers) {
+                    for (var key in options.headers) {
+                        xhr.setRequestHeader(key, options.headers[key]);
+                    }
+                }
+                
+                xhr.onload = function() {
+                    var response = {
+                        ok: xhr.status >= 200 && xhr.status < 300,
+                        status: xhr.status,
+                        statusText: xhr.statusText,
+                        json: function() {
+                            return Promise.resolve(JSON.parse(xhr.responseText));
+                        },
+                        text: function() {
+                            return Promise.resolve(xhr.responseText);
+                        }
+                    };
+                    resolve(response);
+                };
+                
+                xhr.onerror = function() {
+                    reject(new Error('Network error'));
+                };
+                
+                xhr.ontimeout = function() {
+                    reject(new Error('Request timeout'));
+                };
+                
+                xhr.timeout = 15000; // 15 second timeout
+                xhr.send(options.body || null);
+            });
+        };
+    }
+})();
 
-    query: (selector) => {
-        try {
-            return document.querySelector(selector);
-        } catch (error) {
-            console.error(`Error querying selector '${selector}':`, error);
-            return null;
-        }
+// Universal Device Detection and Capabilities
+var DeviceCapabilities = {
+    // Touch detection with better cross-device support
+    hasTouch: function() {
+        return 'ontouchstart' in window || 
+               navigator.maxTouchPoints > 0 || 
+               navigator.msMaxTouchPoints > 0 ||
+               (window.DocumentTouch && document instanceof DocumentTouch);
     },
-
-    queryAll: (selector) => {
-        try {
-            return document.querySelectorAll(selector) || [];
-        } catch (error) {
-            console.error(`Error querying all selector '${selector}':`, error);
-            return [];
-        }
+    
+    // Connection quality detection
+    getConnectionInfo: function() {
+        var connection = navigator.connection || 
+                        navigator.mozConnection || 
+                        navigator.webkitConnection ||
+                        { effectiveType: '4g', downlink: 10 };
+        
+        return {
+            effectiveType: connection.effectiveType || '4g',
+            downlink: connection.downlink || 10,
+            rtt: connection.rtt || 100,
+            saveData: connection.saveData || false
+        };
     },
-
-    addClass: (element, className) => {
-        if (element && element.classList) {
-            element.classList.add(className);
-        }
+    
+    // Device type detection
+    getDeviceType: function() {
+        var width = window.innerWidth || document.documentElement.clientWidth;
+        var userAgent = navigator.userAgent.toLowerCase();
+        
+        if (width <= 480) return 'mobile';
+        if (width <= 1024) return 'tablet';
+        return 'desktop';
     },
-
-    removeClass: (element, className) => {
-        if (element && element.classList) {
-            element.classList.remove(className);
-        }
+    
+    // Browser detection for compatibility
+    getBrowserInfo: function() {
+        var userAgent = navigator.userAgent.toLowerCase();
+        var browser = {
+            isIE: userAgent.indexOf('msie') > -1 || userAgent.indexOf('trident') > -1,
+            isEdge: userAgent.indexOf('edge') > -1,
+            isChrome: userAgent.indexOf('chrome') > -1 && userAgent.indexOf('edge') === -1,
+            isFirefox: userAgent.indexOf('firefox') > -1,
+            isSafari: userAgent.indexOf('safari') > -1 && userAgent.indexOf('chrome') === -1,
+            isMobile: /android|iphone|ipad|ipod|blackberry|iemobile|opera mini/i.test(userAgent),
+            supportsModernFeatures: !!(window.fetch && window.Promise && Array.from)
+        };
+        
+        return browser;
     },
-
-    toggleClass: (element, className) => {
-        if (element && element.classList) {
-            element.classList.toggle(className);
-        }
-    },
-
-    setText: (element, text) => {
-        if (element) {
-            element.textContent = text;
-        }
-    },
-
-    setHTML: (element, html) => {
-        if (element) {
-            element.innerHTML = html;
-        }
+    
+    // Performance capabilities
+    getPerformanceCapabilities: function() {
+        return {
+            hardwareConcurrency: navigator.hardwareConcurrency || 2,
+            deviceMemory: navigator.deviceMemory || 4,
+            maxTouchPoints: navigator.maxTouchPoints || 0,
+            reducedMotion: window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        };
     }
 };
 
-// AI Weather Assistant Class with Enhanced Error Handling
-class WeatherAI {
-    constructor() {
-        this.currentWeatherData = null;
-        this.forecastData = null;
-        this.conversationHistory = [];
+// Enhanced AI Weather Assistant with Universal Compatibility
+var WeatherAI = function(apiKey) {
+    this.apiKey = apiKey || 'demo-key';
+    this.invokeUrl = "https://integrate.api.nvidia.com/v1/chat/completions";
+    this.model = "meta/llama-4-maverick-17b-128e-instruct";
+    this.currentWeatherData = null;
+    this.forecastData = null;
+    this.conversationHistory = [];
+    this.isOnline = navigator.onLine !== false;
+    
+    // Listen for online/offline events
+    var self = this;
+    if (window.addEventListener) {
+        window.addEventListener('online', function() { self.isOnline = true; });
+        window.addEventListener('offline', function() { self.isOnline = false; });
     }
+};
 
-    async generateWeatherInsight(weatherData, forecastData = null) {
-        try {
-            this.currentWeatherData = weatherData;
-            this.forecastData = forecastData;
-
-            // Simulate AI processing with more realistic delay
-            await this.delay(1500 + Math.random() * 1500);
-            
-            return this.generateSimulatedInsight();
-        } catch (error) {
-            console.error('AI insight generation failed:', error);
-            return this.getFallbackInsight(weatherData);
+WeatherAI.prototype = {
+    generateWeatherInsight: function(weatherData, forecastData) {
+        var self = this;
+        self.currentWeatherData = weatherData;
+        self.forecastData = forecastData || null;
+        
+        if (!self.isOnline) {
+            return Promise.resolve(self.getOfflineInsight(weatherData));
         }
-    }
-
-    async handleChatQuery(userQuery) {
-        try {
-            if (!this.currentWeatherData) {
-                return "I don't have current weather data to analyze. Please search for a location first!";
-            }
-
-            // Simulate AI processing
-            await this.delay(1000 + Math.random() * 2000);
-            
-            let response;
-            const query = userQuery.toLowerCase();
-
-            if (query.includes('umbrella') || query.includes('rain')) {
-                response = this.getUmbrellaAdvice();
-            } else if (query.includes('wear') || query.includes('clothing') || query.includes('dress')) {
-                response = this.getClothingAdvice();
-            } else if (query.includes('activities') || query.includes('outdoor') || query.includes('exercise')) {
-                response = this.getActivityAdvice();
-            } else {
-                response = this.getGeneralWeatherAdvice();
-            }
-
-            this.conversationHistory.push({ user: userQuery, ai: response });
-            return response;
-        } catch (error) {
-            console.error('AI chat failed:', error);
-            return this.getFallbackChatResponse(userQuery);
+        
+        var prompt = self.buildWeatherInsightPrompt(weatherData, forecastData);
+        
+        return self.callAI(prompt)
+            .then(function(response) {
+                return self.formatInsightResponse(response);
+            })
+            .catch(function(error) {
+                console.error('AI insight generation failed:', error);
+                return self.getFallbackInsight(weatherData);
+            });
+    },
+    
+    handleChatQuery: function(userQuery) {
+        var self = this;
+        
+        if (!self.currentWeatherData) {
+            return Promise.resolve("I don't have current weather data to analyze. Please search for a location first!");
         }
-    }
-
-    delay(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
-
-    generateSimulatedInsight() {
-        if (!this.currentWeatherData) {
-            return "Weather data not available for insights.";
+        
+        if (!self.isOnline) {
+            return Promise.resolve(self.getOfflineChatResponse(userQuery));
         }
-
-        try {
-            const temp = Math.round(this.currentWeatherData.main.temp);
-            const humidity = this.currentWeatherData.main.humidity;
-            const condition = this.currentWeatherData.weather[0].main.toLowerCase();
-            const windSpeed = Math.round(this.currentWeatherData.wind?.speed * 3.6 || 0);
-
-            const insights = [];
-
-            // Temperature and comfort insight
-            if (temp > 25) {
-                insights.push("🌡️ **High temperature alert**: With temperatures above 25°C, stay hydrated and consider light, breathable clothing to stay comfortable.");
-            } else if (temp < 10) {
-                insights.push("🧥 **Bundle up**: Low temperatures call for warm layers. Don't forget a jacket or coat when heading out.");
-            } else {
-                insights.push("👕 **Pleasant weather**: Comfortable temperatures make it perfect for light to moderate clothing layers.");
-            }
-
-            // Activity recommendation
-            if (condition.includes('rain')) {
-                insights.push("☔ **Indoor day**: Rainy conditions make it ideal for indoor activities. Great time to catch up on reading or visit a museum!");
-            } else if (condition.includes('clear') || condition.includes('sun')) {
-                insights.push("☀️ **Perfect for outdoors**: Clear skies and good visibility make it an excellent day for outdoor activities and sports.");
-            } else if (condition.includes('cloud')) {
-                insights.push("⛅ **Mild outdoor conditions**: Cloudy weather provides natural UV protection - great for walking or light exercise.");
-            }
-
-            // Health and comfort consideration
-            if (humidity > 70) {
-                insights.push("💧 **High humidity**: The air feels muggy today. Take frequent breaks if exercising outdoors and stay in air-conditioned spaces when possible.");
-            } else if (windSpeed > 20) {
-                insights.push("💨 **Windy conditions**: Strong winds may affect outdoor plans. Secure loose items and be cautious with umbrellas.");
-            } else {
-                insights.push("🌿 **Comfortable conditions**: Pleasant humidity and wind levels make it a great day to spend time outdoors.");
-            }
-
-            return insights.join('\n\n');
-        } catch (error) {
-            console.error('Error generating simulated insight:', error);
-            return "Unable to generate detailed insights at this time.";
-        }
-    }
-
-    getUmbrellaAdvice() {
-        if (!this.currentWeatherData) return "I need weather data to give umbrella advice!";
-
-        try {
-            const condition = this.currentWeatherData.weather[0].main.toLowerCase();
-            const humidity = this.currentWeatherData.main.humidity;
-
-            if (condition.includes('rain') || condition.includes('drizzle')) {
-                return "☔ Yes, definitely bring an umbrella! It's currently raining, so you'll want to stay dry.";
-            } else if (condition.includes('thunderstorm')) {
-                return "⛈️ An umbrella won't be very effective in thunderstorm conditions. Consider staying indoors or finding covered shelter instead.";
-            } else if (humidity > 80 && condition.includes('cloud')) {
-                return "🌧️ While it's not raining now, the high humidity and clouds suggest rain is possible. An umbrella might be a good precaution!";
-            } else {
-                return "☀️ No need for an umbrella today! The weather conditions look clear and dry.";
-            }
-        } catch (error) {
-            console.error('Error getting umbrella advice:', error);
-            return "I'm having trouble analyzing the weather conditions for umbrella recommendations.";
-        }
-    }
-
-    getClothingAdvice() {
-        if (!this.currentWeatherData) return "I need weather data to give clothing advice!";
-
-        try {
-            const temp = Math.round(this.currentWeatherData.main.temp);
-            const condition = this.currentWeatherData.weather[0].main.toLowerCase();
-            const windSpeed = Math.round(this.currentWeatherData.wind?.speed * 3.6 || 0);
-
-            let advice = [];
-
-            if (temp > 25) {
-                advice.push("👕 Light, breathable clothing like cotton t-shirts and shorts");
-                advice.push("🧢 Consider a hat for sun protection");
-            } else if (temp > 15) {
-                advice.push("👖 Comfortable jeans or pants with a light shirt");
-                advice.push("🧥 A light jacket or sweater for layering");
-            } else if (temp > 5) {
-                advice.push("🧥 Warm jacket or coat is essential");
-                advice.push("🧤 Consider gloves and a scarf for extra warmth");
-            } else {
-                advice.push("🧥 Heavy winter coat, warm layers underneath");
-                advice.push("🧤 Gloves, scarf, and warm hat are recommended");
-            }
-
-            if (condition.includes('rain')) {
-                advice.push("🧥 Waterproof or water-resistant outer layer");
-            }
-
-            if (windSpeed > 15) {
-                advice.push("💨 Wind-resistant clothing to stay comfortable");
-            }
-
-            return `Based on ${temp}°C weather:\n\n${advice.join('\n')}`;
-        } catch (error) {
-            console.error('Error getting clothing advice:', error);
-            return "I'm having trouble analyzing the weather conditions for clothing recommendations.";
-        }
-    }
-
-    getActivityAdvice() {
-        if (!this.currentWeatherData) return "I need weather data to suggest activities!";
-
-        try {
-            const temp = Math.round(this.currentWeatherData.main.temp);
-            const condition = this.currentWeatherData.weather[0].main.toLowerCase();
-
-            if (condition.includes('rain') || condition.includes('storm')) {
-                return "🏠 **Indoor activities recommended**: Visit a museum, go shopping, read a book, or try a new recipe. Perfect weather for cozy indoor pursuits!";
-            } else if (condition.includes('snow')) {
-                return "❄️ **Winter activities**: If you enjoy snow, consider skiing, snowboarding, or building a snowman. Otherwise, warm indoor activities are best.";
-            } else if (temp > 25 && condition.includes('clear')) {
-                return "🏖️ **Great for summer activities**: Swimming, beach visits, outdoor sports, or picnics. Just remember sun protection and hydration!";
-            } else if (temp > 15 && temp <= 25) {
-                return "🚶 **Perfect for outdoor activities**: Walking, hiking, cycling, outdoor dining, or sports. Ideal weather conditions for being active outside!";
-            } else if (temp > 5) {
-                return "🚶 **Light outdoor activities**: Brisk walks, jogging, or outdoor markets. Layer up and enjoy the fresh air!";
-            } else {
-                return "🏠 **Indoor activities recommended**: Cold weather calls for cozy indoor pursuits. Try a gym workout, indoor climbing, or cultural activities.";
-            }
-        } catch (error) {
-            console.error('Error getting activity advice:', error);
-            return "I'm having trouble analyzing the weather conditions for activity recommendations.";
-        }
-    }
-
-    getGeneralWeatherAdvice() {
-        if (!this.currentWeatherData) {
-            return "Search for a location first to get personalized weather advice!";
-        }
-
-        try {
-            const temp = Math.round(this.currentWeatherData.main.temp);
-            const condition = this.currentWeatherData.weather[0].description;
-            const location = `${this.currentWeatherData.name}, ${this.currentWeatherData.sys.country}`;
-
-            return `Current conditions in ${location} show ${condition} with temperatures around ${temp}°C. This is great weather data to work with! Feel free to ask me specific questions about clothing, activities, or whether you need an umbrella today.`;
-        } catch (error) {
-            console.error('Error getting general weather advice:', error);
-            return "I have weather data available. Feel free to ask me about clothing, activities, or umbrella recommendations!";
-        }
-    }
-
-    getFallbackInsight(weatherData) {
-        try {
-            const temp = Math.round(weatherData.main.temp);
-            const condition = weatherData.weather[0].description;
-            
-            return `<strong>Weather Summary</strong><br>
-Current conditions show ${condition} with ${temp}°C temperature. Check back soon for more detailed AI insights as we continue to enhance our analysis capabilities.`;
-        } catch (error) {
-            return "Weather data is available. More detailed insights will be available soon.";
-        }
-    }
-
-    getFallbackChatResponse(query) {
-        return "I'm having trouble connecting to the AI service right now. Please try again in a moment, or check that you've searched for a location to get current weather data!";
-    }
-}
-
-// Main WeatherPro Application Class
-class WeatherPro {
-    constructor() {
-        this.apiKey = 'f146799a557e8ab658304c1b30cc3cfd';
-        this.baseUrl = 'https://api.openweathermap.org/data/2.5';
-        this.defaultCity = 'Krishnagiri';
-        this.currentLocation = null;
-        this.currentWeatherData = null;
-        this.currentForecastData = null;
-        this.weatherIcons = {
-            '01d': '☀️', '01n': '🌙',
-            '02d': '⛅', '02n': '⛅', 
-            '03d': '☁️', '03n': '☁️',
-            '04d': '☁️', '04n': '☁️',
-            '09d': '🌧️', '09n': '🌧️',
-            '10d': '🌦️', '10n': '🌦️',
-            '11d': '⛈️', '11n': '⛈️',
-            '13d': '❄️', '13n': '❄️',
-            '50d': '🌫️', '50n': '🌫️'
+        
+        var prompt = self.buildChatPrompt(userQuery, self.currentWeatherData, self.forecastData);
+        
+        return self.callAI(prompt)
+            .then(function(response) {
+                self.conversationHistory.push({ user: userQuery, ai: response });
+                return response;
+            })
+            .catch(function(error) {
+                console.error('AI chat failed:', error);
+                return self.getFallbackChatResponse(userQuery);
+            });
+    },
+    
+    buildWeatherInsightPrompt: function(weatherData, forecastData) {
+        var weather = {
+            location: weatherData.name + ', ' + weatherData.sys.country,
+            temperature: Math.round(weatherData.main.temp),
+            feelsLike: Math.round(weatherData.main.feels_like),
+            condition: weatherData.weather[0].description,
+            humidity: weatherData.main.humidity,
+            windSpeed: Math.round((weatherData.wind && weatherData.wind.speed ? weatherData.wind.speed : 0) * 3.6),
+            pressure: weatherData.main.pressure,
+            visibility: Math.round(((weatherData.visibility || 10000) / 1000))
         };
         
-        // Initialize AI with error handling
-        try {
-            this.weatherAI = new WeatherAI();
-        } catch (error) {
-            console.error('Failed to initialize WeatherAI:', error);
-            this.weatherAI = null;
+        return 'As a professional weather assistant, analyze this weather data and provide 3 helpful insights for daily planning:\n\n' +
+               'Location: ' + weather.location + '\n' +
+               'Temperature: ' + weather.temperature + '°C (feels like ' + weather.feelsLike + '°C)\n' +
+               'Condition: ' + weather.condition + '\n' +
+               'Humidity: ' + weather.humidity + '%\n' +
+               'Wind Speed: ' + weather.windSpeed + ' km/h\n' +
+               'Pressure: ' + weather.pressure + ' hPa\n' +
+               'Visibility: ' + weather.visibility + ' km\n\n' +
+               'Provide practical, concise insights about:\n' +
+               '1. Comfort and clothing recommendations\n' +
+               '2. Activity suggestions based on conditions\n' +
+               '3. Health or safety considerations\n\n' +
+               'Keep each insight to 1-2 sentences and focus on actionable advice.';
+    },
+    
+    buildChatPrompt: function(userQuery, weatherData, forecastData) {
+        var weather = {
+            location: weatherData.name + ', ' + weatherData.sys.country,
+            temperature: Math.round(weatherData.main.temp),
+            feelsLike: Math.round(weatherData.main.feels_like),
+            condition: weatherData.weather[0].description,
+            humidity: weatherData.main.humidity,
+            windSpeed: Math.round((weatherData.wind && weatherData.wind.speed ? weatherData.wind.speed : 0) * 3.6),
+            pressure: weatherData.main.pressure
+        };
+        
+        return 'You are a helpful weather assistant. Answer the user\'s question based on current weather data:\n\n' +
+               'Current Weather in ' + weather.location + ':\n' +
+               '- Temperature: ' + weather.temperature + '°C (feels like ' + weather.feelsLike + '°C)\n' +
+               '- Condition: ' + weather.condition + '\n' +
+               '- Humidity: ' + weather.humidity + '%\n' +
+               '- Wind: ' + weather.windSpeed + ' km/h\n' +
+               '- Pressure: ' + weather.pressure + ' hPa\n\n' +
+               'User Question: ' + userQuery + '\n\n' +
+               'Provide a helpful, conversational response focused on practical weather advice. Keep it concise and friendly.';
+    },
+    
+    callAI: function(prompt) {
+        // For demo purposes, simulate AI responses with more realistic delays
+        return this.simulateAIResponse(prompt);
+    },
+    
+    simulateAIResponse: function(prompt) {
+        var self = this;
+        var connection = DeviceCapabilities.getConnectionInfo();
+        var delay = connection.effectiveType === '2g' ? 3000 + Math.random() * 2000 :
+                   connection.effectiveType === '3g' ? 2000 + Math.random() * 1500 :
+                   1000 + Math.random() * 1000;
+        
+        return new Promise(function(resolve) {
+            setTimeout(function() {
+                if (prompt.indexOf('insights for daily planning') > -1) {
+                    resolve(self.generateSimulatedInsight());
+                } else if (prompt.indexOf('umbrella') > -1) {
+                    resolve(self.getUmbrellaAdvice());
+                } else if (prompt.indexOf('wear') > -1 || prompt.indexOf('clothing') > -1) {
+                    resolve(self.getClothingAdvice());
+                } else if (prompt.indexOf('activities') > -1 || prompt.indexOf('outdoor') > -1) {
+                    resolve(self.getActivityAdvice());
+                } else {
+                    resolve(self.getGeneralWeatherAdvice());
+                }
+            }, delay);
+        });
+    },
+    
+    generateSimulatedInsight: function() {
+        if (!this.currentWeatherData) return "Weather data not available for insights.";
+        
+        var temp = Math.round(this.currentWeatherData.main.temp);
+        var humidity = this.currentWeatherData.main.humidity;
+        var condition = this.currentWeatherData.weather[0].main.toLowerCase();
+        var windSpeed = Math.round((this.currentWeatherData.wind && this.currentWeatherData.wind.speed ? this.currentWeatherData.wind.speed : 0) * 3.6);
+        
+        var insights = [];
+        
+        // Temperature and comfort insight
+        if (temp > 25) {
+            insights.push("🌡️ **High temperature alert**: With temperatures above 25°C, stay hydrated and consider light, breathable clothing to stay comfortable.");
+        } else if (temp < 10) {
+            insights.push("🧥 **Bundle up**: Low temperatures call for warm layers. Don't forget a jacket or coat when heading out.");
+        } else {
+            insights.push("👕 **Pleasant weather**: Comfortable temperatures make it perfect for light to moderate clothing layers.");
         }
         
-        this.init();
+        // Activity recommendation
+        if (condition.indexOf('rain') > -1) {
+            insights.push("☔ **Indoor day**: Rainy conditions make it ideal for indoor activities. Great time to catch up on reading or visit a museum!");
+        } else if (condition.indexOf('clear') > -1 || condition.indexOf('sun') > -1) {
+            insights.push("☀️ **Perfect for outdoors**: Clear skies and good visibility make it an excellent day for outdoor activities and sports.");
+        } else if (condition.indexOf('cloud') > -1) {
+            insights.push("⛅ **Mild outdoor conditions**: Cloudy weather provides natural UV protection - great for walking or light exercise.");
+        }
+        
+        // Health and comfort consideration
+        if (humidity > 70) {
+            insights.push("💧 **High humidity**: The air feels muggy today. Take frequent breaks if exercising outdoors and stay in air-conditioned spaces when possible.");
+        } else if (windSpeed > 20) {
+            insights.push("💨 **Windy conditions**: Strong winds may affect outdoor plans. Secure loose items and be cautious with umbrellas.");
+        } else {
+            insights.push("🌿 **Comfortable conditions**: Pleasant humidity and wind levels make it a great day to spend time outdoors.");
+        }
+        
+        return insights.join('\n\n');
+    },
+    
+    getUmbrellaAdvice: function() {
+        if (!this.currentWeatherData) return "I need weather data to give umbrella advice!";
+        
+        var condition = this.currentWeatherData.weather[0].main.toLowerCase();
+        var humidity = this.currentWeatherData.main.humidity;
+        
+        if (condition.indexOf('rain') > -1 || condition.indexOf('drizzle') > -1) {
+            return "☔ Yes, definitely bring an umbrella! It's currently raining, so you'll want to stay dry.";
+        } else if (condition.indexOf('thunderstorm') > -1) {
+            return "⛈️ An umbrella won't be very effective in thunderstorm conditions. Consider staying indoors or finding covered shelter instead.";
+        } else if (humidity > 80 && condition.indexOf('cloud') > -1) {
+            return "🌧️ While it's not raining now, the high humidity and clouds suggest rain is possible. An umbrella might be a good precaution!";
+        } else {
+            return "☀️ No need for an umbrella today! The weather conditions look clear and dry.";
+        }
+    },
+    
+    getClothingAdvice: function() {
+        if (!this.currentWeatherData) return "I need weather data to give clothing advice!";
+        
+        var temp = Math.round(this.currentWeatherData.main.temp);
+        var condition = this.currentWeatherData.weather[0].main.toLowerCase();
+        var windSpeed = Math.round((this.currentWeatherData.wind && this.currentWeatherData.wind.speed ? this.currentWeatherData.wind.speed : 0) * 3.6);
+        
+        var advice = [];
+        
+        if (temp > 25) {
+            advice.push("👕 Light, breathable clothing like cotton t-shirts and shorts");
+            advice.push("🧢 Consider a hat for sun protection");
+        } else if (temp > 15) {
+            advice.push("👖 Comfortable jeans or pants with a light shirt");
+            advice.push("🧥 A light jacket or sweater for layering");
+        } else if (temp > 5) {
+            advice.push("🧥 Warm jacket or coat is essential");
+            advice.push("🧤 Consider gloves and a scarf for extra warmth");
+        } else {
+            advice.push("🧥 Heavy winter coat, warm layers underneath");
+            advice.push("🧤 Gloves, scarf, and warm hat are recommended");
+        }
+        
+        if (condition.indexOf('rain') > -1) {
+            advice.push("🧥 Waterproof or water-resistant outer layer");
+        }
+        
+        if (windSpeed > 15) {
+            advice.push("💨 Wind-resistant clothing to stay comfortable");
+        }
+        
+        return 'Based on ' + temp + '°C weather:\n\n' + advice.join('\n');
+    },
+    
+    getActivityAdvice: function() {
+        if (!this.currentWeatherData) return "I need weather data to suggest activities!";
+        
+        var temp = Math.round(this.currentWeatherData.main.temp);
+        var condition = this.currentWeatherData.weather[0].main.toLowerCase();
+        
+        if (condition.indexOf('rain') > -1 || condition.indexOf('storm') > -1) {
+            return "🏠 **Indoor activities recommended**: Visit a museum, go shopping, read a book, or try a new recipe. Perfect weather for cozy indoor pursuits!";
+        } else if (condition.indexOf('snow') > -1) {
+            return "❄️ **Winter activities**: If you enjoy snow, consider skiing, snowboarding, or building a snowman. Otherwise, warm indoor activities are best.";
+        } else if (temp > 25 && condition.indexOf('clear') > -1) {
+            return "🏖️ **Great for summer activities**: Swimming, beach visits, outdoor sports, or picnics. Just remember sun protection and hydration!";
+        } else if (temp > 15 && temp <= 25) {
+            return "🚶 **Perfect for outdoor activities**: Walking, hiking, cycling, outdoor dining, or sports. Ideal weather conditions for being active outside!";
+        } else if (temp > 5) {
+            return "🚶 **Light outdoor activities**: Brisk walks, jogging, or outdoor markets. Layer up and enjoy the fresh air!";
+        } else {
+            return "🏠 **Indoor activities recommended**: Cold weather calls for cozy indoor pursuits. Try a gym workout, indoor climbing, or cultural activities.";
+        }
+    },
+    
+    getGeneralWeatherAdvice: function() {
+        if (!this.currentWeatherData) return "Search for a location first to get personalized weather advice!";
+        
+        var temp = Math.round(this.currentWeatherData.main.temp);
+        var condition = this.currentWeatherData.weather[0].description;
+        var location = this.currentWeatherData.name + ', ' + this.currentWeatherData.sys.country;
+        
+        return 'Current conditions in ' + location + ' show ' + condition + ' with temperatures around ' + temp + '°C. This is great weather data to work with! Feel free to ask me specific questions about clothing, activities, or whether you need an umbrella today.';
+    },
+    
+    getOfflineInsight: function(weatherData) {
+        var temp = Math.round(weatherData.main.temp);
+        var condition = weatherData.weather[0].description;
+        return '**Offline Weather Summary**<br>Current conditions show ' + condition + ' with ' + temp + '°C temperature. Connect to the internet for detailed AI insights.';
+    },
+    
+    getOfflineChatResponse: function(query) {
+        return "I'm currently offline and can't provide detailed AI responses. Please check your internet connection and try again!";
+    },
+    
+    formatInsightResponse: function(response) {
+        return response.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    },
+    
+    getFallbackInsight: function(weatherData) {
+        var temp = Math.round(weatherData.main.temp);
+        var condition = weatherData.weather[0].description;
+        return '<strong>Weather Summary</strong><br>Current conditions show ' + condition + ' with ' + temp + '°C temperature. Check back soon for more detailed AI insights.';
+    },
+    
+    getFallbackChatResponse: function(query) {
+        return "I'm having trouble connecting to the AI service right now. Please try again in a moment, or check that you've searched for a location to get current weather data!";
     }
+};
 
-    init() {
+// Enhanced WeatherPro Application with Universal Device Support
+var WeatherPro = function() {
+    this.apiKey = 'f146799a557e8ab658304c1b30cc3cfd';
+    this.baseUrl = 'https://api.openweathermap.org/data/2.5';
+    this.currentLocation = null;
+    this.currentWeatherData = null;
+    this.currentForecastData = null;
+    this.weatherIcons = {
+        '01d': '☀️', '01n': '🌙',
+        '02d': '⛅', '02n': '⛅', 
+        '03d': '☁️', '03n': '☁️',
+        '04d': '☁️', '04n': '☁️',
+        '09d': '🌧️', '09n': '🌧️',
+        '10d': '🌦️', '10n': '🌦️',
+        '11d': '⛈️', '11n': '⛈️',
+        '13d': '❄️', '13n': '❄️',
+        '50d': '🌫️', '50n': '🌫️'
+    };
+    
+    // Device and browser detection
+    this.deviceInfo = {
+        type: DeviceCapabilities.getDeviceType(),
+        hasTouch: DeviceCapabilities.hasTouch(),
+        browser: DeviceCapabilities.getBrowserInfo(),
+        performance: DeviceCapabilities.getPerformanceCapabilities(),
+        connection: DeviceCapabilities.getConnectionInfo()
+    };
+    
+    // Initialize AI with enhanced error handling
+    try {
+        this.weatherAI = new WeatherAI();
+    } catch (error) {
+        console.error('Failed to initialize WeatherAI:', error);
+        this.weatherAI = null;
+    }
+    
+    this.init();
+};
+
+WeatherPro.prototype = {
+    init: function() {
+        var self = this;
+        
+        // Ensure DOM is ready with cross-browser support
+        if (document.readyState === 'loading') {
+            if (document.addEventListener) {
+                document.addEventListener('DOMContentLoaded', function() {
+                    self.initializeApp();
+                });
+            } else if (document.attachEvent) {
+                document.attachEvent('onreadystatechange', function() {
+                    if (document.readyState === 'complete') {
+                        self.initializeApp();
+                    }
+                });
+            }
+        } else {
+            this.initializeApp();
+        }
+    },
+    
+    initializeApp: function() {
         try {
             this.bindEvents();
             this.updateCurrentDate();
@@ -330,932 +579,1179 @@ class WeatherPro {
             this.initNavigation();
             this.initContactForm();
             this.initAIChat();
-            console.log('WeatherPro initialized successfully');
+            this.initAccessibilityFeatures();
+            this.initPerformanceOptimizations();
+            this.logDeviceInfo();
         } catch (error) {
-            console.error('Error during WeatherPro initialization:', error);
+            console.error('Error initializing WeatherPro:', error);
+            this.showError('Failed to initialize application. Please refresh the page.');
         }
-    }
-
-    bindEvents() {
-        try {
-            // Weather functionality with error checking
-            const searchBtn = SafeDOM.get('searchBtn');
-            const cityInput = SafeDOM.get('cityInput');
-            const locationBtn = SafeDOM.get('locationBtn');
-            const retryBtn = SafeDOM.get('retryBtn');
-
-            if (searchBtn) {
-                searchBtn.addEventListener('click', () => this.handleSearch());
-            }
-            
-            if (cityInput) {
-                cityInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        this.handleSearch();
-                    }
-                });
-                
-                // Clear error state when user starts typing
-                cityInput.addEventListener('input', () => {
-                    this.clearError();
-                });
-            }
-            
-            if (locationBtn) {
-                locationBtn.addEventListener('click', () => this.handleGeolocation());
-            }
-            
-            if (retryBtn) {
-                retryBtn.addEventListener('click', () => this.loadDefaultWeather());
-            }
-
-            // Navigation events with error checking
-            this.bindNavigationEvents();
-
-            console.log('Events bound successfully');
-        } catch (error) {
-            console.error('Error binding events:', error);
-        }
-    }
-
-    bindNavigationEvents() {
-        try {
-            const hamburger = SafeDOM.get('hamburger');
-            const mobileMenuOverlay = SafeDOM.get('mobileMenuOverlay');
-
-            if (hamburger) {
-                hamburger.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    this.toggleMobileMenu();
-                });
-            }
-
-            if (mobileMenuOverlay) {
-                mobileMenuOverlay.addEventListener('click', (e) => {
-                    if (e.target === mobileMenuOverlay) {
-                        this.closeMobileMenu();
-                    }
-                });
-            }
-
-            // Smooth scrolling for all navigation links
-            const navLinks = SafeDOM.queryAll('a[href^="#"]');
-            navLinks.forEach(anchor => {
-                anchor.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    const targetId = anchor.getAttribute('href').substring(1);
-                    const target = SafeDOM.get(targetId);
-                    if (target) {
-                        this.scrollToSection(target);
-                        this.closeMobileMenu();
-                        this.updateActiveNavLink(targetId);
-                    }
-                });
-            });
-
-            // Update active nav on scroll with throttling
-            let scrollTimeout;
-            window.addEventListener('scroll', () => {
-                if (scrollTimeout) {
-                    clearTimeout(scrollTimeout);
-                }
-                scrollTimeout = setTimeout(() => {
-                    this.updateActiveNav();
-                }, 100);
-            });
-
-            console.log('Navigation events bound successfully');
-        } catch (error) {
-            console.error('Error binding navigation events:', error);
-        }
-    }
-
-    // Enhanced AI Chat functionality
-    initAIChat() {
-        try {
-            const aiChatBubble = SafeDOM.get('aiChatBubble');
-            const aiChatClose = SafeDOM.get('aiChatClose');
-            const aiChatSend = SafeDOM.get('aiChatSend');
-            const aiChatInput = SafeDOM.get('aiChatInput');
-
-            if (aiChatBubble) {
-                aiChatBubble.addEventListener('click', () => this.toggleAIChat());
-            }
-
-            if (aiChatClose) {
-                aiChatClose.addEventListener('click', () => this.closeAIChat());
-            }
-
-            if (aiChatSend) {
-                aiChatSend.addEventListener('click', () => this.sendAIMessage());
-            }
-
-            if (aiChatInput) {
-                aiChatInput.addEventListener('keypress', (e) => {
-                    if (e.key === 'Enter') {
-                        e.preventDefault();
-                        this.sendAIMessage();
-                    }
-                });
-            }
-
-            // Suggestion buttons with error handling
-            const suggestionBtns = SafeDOM.queryAll('.ai-suggestion-btn');
-            suggestionBtns.forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    try {
-                        const query = e.target.getAttribute('data-query');
-                        if (query) {
-                            this.handleSuggestionClick(query);
-                        }
-                    } catch (error) {
-                        console.error('Error handling suggestion click:', error);
-                    }
-                });
-            });
-
-            console.log('AI Chat initialized successfully');
-        } catch (error) {
-            console.error('Error initializing AI Chat:', error);
-        }
-    }
-
-    toggleAIChat() {
-        try {
-            const aiChatPanel = SafeDOM.get('aiChatPanel');
-            if (aiChatPanel) {
-                SafeDOM.toggleClass(aiChatPanel, 'hidden');
-            }
-        } catch (error) {
-            console.error('Error toggling AI chat:', error);
-        }
-    }
-
-    closeAIChat() {
-        try {
-            const aiChatPanel = SafeDOM.get('aiChatPanel');
-            if (aiChatPanel) {
-                SafeDOM.addClass(aiChatPanel, 'hidden');
-            }
-        } catch (error) {
-            console.error('Error closing AI chat:', error);
-        }
-    }
-
-    async sendAIMessage() {
-        try {
-            const aiChatInput = SafeDOM.get('aiChatInput');
-            const message = aiChatInput?.value?.trim();
-            
-            if (!message || !this.weatherAI) return;
-
-            // Clear input
-            if (aiChatInput) {
-                aiChatInput.value = '';
-            }
-
-            // Add user message to chat
-            this.addChatMessage(message, 'user');
-
-            // Show typing indicator
-            this.showAITyping();
-
-            try {
-                // Get AI response
-                const response = await this.weatherAI.handleChatQuery(message);
-                
-                // Remove typing indicator and add AI response
-                this.hideAITyping();
-                this.addChatMessage(response, 'ai');
-                
-            } catch (error) {
-                console.error('AI chat error:', error);
-                this.hideAITyping();
-                this.addChatMessage("Sorry, I'm having trouble responding right now. Please try again!", 'ai');
-            }
-        } catch (error) {
-            console.error('Error sending AI message:', error);
-        }
-    }
-
-    handleSuggestionClick(query) {
-        try {
-            const aiChatInput = SafeDOM.get('aiChatInput');
-            if (aiChatInput) {
-                aiChatInput.value = query;
-                this.sendAIMessage();
-            }
-        } catch (error) {
-            console.error('Error handling suggestion click:', error);
-        }
-    }
-
-    addChatMessage(message, sender) {
-        try {
-            const aiChatMessages = SafeDOM.get('aiChatMessages');
-            if (!aiChatMessages) return;
-
-            const messageElement = document.createElement('div');
-            messageElement.className = sender === 'user' ? 'user-message' : 'ai-message';
-
-            const avatar = document.createElement('div');
-            avatar.className = sender === 'user' ? 'user-avatar' : 'ai-avatar';
-            avatar.textContent = sender === 'user' ? '👤' : '🤖';
-
-            const text = document.createElement('div');
-            text.className = sender === 'user' ? 'user-text' : 'ai-text';
-            text.innerHTML = message; // Using innerHTML to support formatting
-
-            messageElement.appendChild(avatar);
-            messageElement.appendChild(text);
-            aiChatMessages.appendChild(messageElement);
-            
-            // Scroll to bottom
-            aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
-        } catch (error) {
-            console.error('Error adding chat message:', error);
-        }
-    }
-
-    showAITyping() {
-        try {
-            const aiChatMessages = SafeDOM.get('aiChatMessages');
-            if (!aiChatMessages) return;
-
-            const typingElement = document.createElement('div');
-            typingElement.className = 'ai-message ai-typing-message';
-            typingElement.innerHTML = `
-                <div class="ai-avatar">🤖</div>
-                <div class="ai-text ai-typing">
-                    <span>Thinking...</span>
-                    <div class="ai-typing-dots">
-                        <div class="ai-typing-dot"></div>
-                        <div class="ai-typing-dot"></div>
-                        <div class="ai-typing-dot"></div>
-                    </div>
-                </div>
-            `;
-
-            aiChatMessages.appendChild(typingElement);
-            aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
-        } catch (error) {
-            console.error('Error showing AI typing indicator:', error);
-        }
-    }
-
-    hideAITyping() {
-        try {
-            const typingMessage = SafeDOM.query('.ai-typing-message');
-            if (typingMessage) {
-                typingMessage.remove();
-            }
-        } catch (error) {
-            console.error('Error hiding AI typing indicator:', error);
-        }
-    }
-
-    async generateAIInsights(weatherData, forecastData) {
-        if (!this.weatherAI) return;
-
-        try {
-            const aiInsightsCard = SafeDOM.get('aiInsightsCard');
-            const aiInsightsContent = SafeDOM.get('aiInsightsContent');
-            const aiInsightsLoading = SafeDOM.get('aiInsightsLoading');
-
-            if (!aiInsightsCard || !aiInsightsContent) return;
-
-            // Show the insights card and loading state
-            SafeDOM.removeClass(aiInsightsCard, 'hidden');
-            if (aiInsightsLoading) {
-                SafeDOM.removeClass(aiInsightsLoading, 'hidden');
-            }
-            
-            try {
-                // Generate AI insights
-                const insights = await this.weatherAI.generateWeatherInsight(weatherData, forecastData);
-                
-                // Hide loading and show insights
-                if (aiInsightsLoading) {
-                    SafeDOM.addClass(aiInsightsLoading, 'hidden');
-                }
-                
-                // Convert insights to formatted HTML
-                const formattedInsights = insights.split('\n\n').map(insight => 
-                    `<div class="ai-insight-item">${insight.trim()}</div>`
-                ).join('');
-                
-                SafeDOM.setHTML(aiInsightsContent, formattedInsights);
-                
-            } catch (error) {
-                console.error('Error generating AI insights:', error);
-                if (aiInsightsLoading) {
-                    SafeDOM.addClass(aiInsightsLoading, 'hidden');
-                }
-                SafeDOM.setHTML(aiInsightsContent, '<p>Unable to generate insights at this time. Please try again later.</p>');
-            }
-        } catch (error) {
-            console.error('Error in generateAIInsights:', error);
-        }
-    }
-
-    // Enhanced Navigation functionality
-    initNavigation() {
-        try {
-            this.updateActiveNav();
-            console.log('Navigation initialized successfully');
-        } catch (error) {
-            console.error('Error initializing navigation:', error);
-        }
-    }
-
-    toggleMobileMenu() {
-        try {
-            const hamburger = SafeDOM.get('hamburger');
-            const mobileMenuOverlay = SafeDOM.get('mobileMenuOverlay');
-
-            if (hamburger && mobileMenuOverlay) {
-                SafeDOM.toggleClass(hamburger, 'active');
-                SafeDOM.toggleClass(mobileMenuOverlay, 'active');
-                SafeDOM.toggleClass(mobileMenuOverlay, 'hidden');
-                
-                // Prevent body scroll when menu is open
-                if (mobileMenuOverlay.classList.contains('active')) {
-                    document.body.style.overflow = 'hidden';
-                } else {
-                    document.body.style.overflow = '';
-                }
-            }
-        } catch (error) {
-            console.error('Error toggling mobile menu:', error);
-        }
-    }
-
-    closeMobileMenu() {
-        try {
-            const hamburger = SafeDOM.get('hamburger');
-            const mobileMenuOverlay = SafeDOM.get('mobileMenuOverlay');
-
-            if (hamburger) {
-                SafeDOM.removeClass(hamburger, 'active');
-            }
-            if (mobileMenuOverlay) {
-                SafeDOM.removeClass(mobileMenuOverlay, 'active');
-                SafeDOM.addClass(mobileMenuOverlay, 'hidden');
-            }
-            document.body.style.overflow = '';
-        } catch (error) {
-            console.error('Error closing mobile menu:', error);
-        }
-    }
-
-    scrollToSection(target) {
-        try {
-            const navbarHeight = 70;
-            const targetPosition = target.offsetTop - navbarHeight;
-            
-            window.scrollTo({
-                top: targetPosition,
-                behavior: 'smooth'
-            });
-        } catch (error) {
-            console.error('Error scrolling to section:', error);
-        }
-    }
-
-    updateActiveNav() {
-        try {
-            const sections = SafeDOM.queryAll('.section');
-            const navLinks = SafeDOM.queryAll('.nav-link, .mobile-nav-link');
-            const navbarHeight = 70;
-            
-            let currentSection = 'weather'; // default
-            
-            sections.forEach(section => {
-                try {
-                    const sectionTop = section.offsetTop - navbarHeight - 100;
-                    const sectionBottom = sectionTop + section.offsetHeight;
-                    
-                    if (window.scrollY >= sectionTop && window.scrollY < sectionBottom) {
-                        currentSection = section.getAttribute('id');
-                    }
-                } catch (error) {
-                    console.warn('Error processing section:', error);
-                }
-            });
-
-            this.updateActiveNavLink(currentSection);
-        } catch (error) {
-            console.error('Error updating active nav:', error);
-        }
-    }
-
-    updateActiveNavLink(activeSection) {
-        try {
-            const navLinks = SafeDOM.queryAll('.nav-link, .mobile-nav-link');
-            navLinks.forEach(link => {
-                SafeDOM.removeClass(link, 'active');
-                if (link.getAttribute('href') === `#${activeSection}` || 
-                    link.getAttribute('data-section') === activeSection) {
-                    SafeDOM.addClass(link, 'active');
-                }
-            });
-        } catch (error) {
-            console.error('Error updating active nav link:', error);
-        }
-    }
-
-    // Enhanced Contact form functionality
-    initContactForm() {
-        try {
-            const contactForm = SafeDOM.get('contactForm');
-            if (contactForm) {
-                contactForm.addEventListener('submit', (e) => this.handleContactSubmit(e));
-            }
-
-            // Real-time validation with error handling
-            const fields = [
-                { id: 'contactName', name: 'name' },
-                { id: 'contactEmail', name: 'email' },
-                { id: 'contactMessage', name: 'message' }
-            ];
-
-            fields.forEach(field => {
-                const input = SafeDOM.get(field.id);
-                if (input) {
-                    input.addEventListener('blur', () => this.validateField(field.name));
-                    input.addEventListener('input', () => this.clearFieldError(field.name));
-                }
-            });
-
-            console.log('Contact form initialized successfully');
-        } catch (error) {
-            console.error('Error initializing contact form:', error);
-        }
-    }
-
-    validateField(fieldName) {
-        try {
-            const field = SafeDOM.get(`contact${fieldName.charAt(0).toUpperCase() + fieldName.slice(1)}`);
-            const errorElement = SafeDOM.get(`${fieldName}Error`);
-            
-            if (!field) return true;
-
-            let isValid = true;
-            let errorMessage = '';
-
-            const value = field.value ? field.value.trim() : '';
-
-            switch (fieldName) {
-                case 'name':
-                    if (!value) {
-                        isValid = false;
-                        errorMessage = 'Name is required';
-                    } else if (value.length < 2) {
-                        isValid = false;
-                        errorMessage = 'Name must be at least 2 characters';
-                    }
-                    break;
-                
-                case 'email':
-                    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-                    if (!value) {
-                        isValid = false;
-                        errorMessage = 'Email is required';
-                    } else if (!emailRegex.test(value)) {
-                        isValid = false;
-                        errorMessage = 'Please enter a valid email address';
-                    }
-                    break;
-                
-                case 'message':
-                    if (!value) {
-                        isValid = false;
-                        errorMessage = 'Message is required';
-                    } else if (value.length < 10) {
-                        isValid = false;
-                        errorMessage = 'Message must be at least 10 characters';
-                    }
-                    break;
-            }
-
-            if (!isValid) {
-                this.showFieldError(fieldName, errorMessage);
-                field.style.borderColor = 'var(--color-error)';
-            } else {
-                this.clearFieldError(fieldName);
-                field.style.borderColor = 'var(--color-border)';
-            }
-
-            return isValid;
-        } catch (error) {
-            console.error(`Error validating field ${fieldName}:`, error);
-            return true; // Assume valid on error
-        }
-    }
-
-    showFieldError(fieldName, message) {
-        try {
-            const errorElement = SafeDOM.get(`${fieldName}Error`);
-            if (errorElement) {
-                SafeDOM.setText(errorElement, message);
-                SafeDOM.addClass(errorElement, 'show');
-            }
-        } catch (error) {
-            console.error(`Error showing field error for ${fieldName}:`, error);
-        }
-    }
-
-    clearFieldError(fieldName) {
-        try {
-            const errorElement = SafeDOM.get(`${fieldName}Error`);
-            if (errorElement) {
-                SafeDOM.removeClass(errorElement, 'show');
-            }
-        } catch (error) {
-            console.error(`Error clearing field error for ${fieldName}:`, error);
-        }
-    }
-
-    async handleContactSubmit(e) {
-        e.preventDefault();
-        
-        try {
-            // Hide previous messages
-            this.hideFormMessages();
-            
-            // Validate all fields
-            const nameValid = this.validateField('name');
-            const emailValid = this.validateField('email');
-            const messageValid = this.validateField('message');
-            
-            if (!nameValid || !emailValid || !messageValid) {
-                this.showFormError('Please fix the errors above');
-                return;
-            }
-
-            const submitBtn = SafeDOM.get('submitBtn');
-            const originalText = submitBtn ? submitBtn.textContent : 'Send Message';
-            
-            try {
-                // Show loading state
-                if (submitBtn) {
-                    submitBtn.disabled = true;
-                    SafeDOM.setText(submitBtn, 'Sending...');
-                }
-                
-                // Simulate form submission
-                await this.simulateFormSubmission();
-                
-                // Show success message and reset form
-                this.showFormSuccess();
-                this.resetContactForm();
-                
-            } catch (error) {
-                this.showFormError('Failed to send message. Please try again.');
-            } finally {
-                if (submitBtn) {
-                    submitBtn.disabled = false;
-                    SafeDOM.setText(submitBtn, originalText);
-                }
-            }
-        } catch (error) {
-            console.error('Error handling contact form submit:', error);
-            this.showFormError('An unexpected error occurred. Please try again.');
-        }
-    }
-
-    async simulateFormSubmission() {
-        // Simulate API delay
-        return new Promise((resolve) => {
-            setTimeout(resolve, 1500);
+    },
+    
+    logDeviceInfo: function() {
+        console.log('WeatherPro Device Info:', {
+            type: this.deviceInfo.type,
+            hasTouch: this.deviceInfo.hasTouch,
+            browser: this.deviceInfo.browser,
+            connection: this.deviceInfo.connection,
+            performance: this.deviceInfo.performance
         });
-    }
-
-    hideFormMessages() {
-        try {
-            const successElement = SafeDOM.get('formSuccess');
-            const errorElement = SafeDOM.get('formError');
-            
-            if (successElement) {
-                SafeDOM.addClass(successElement, 'hidden');
-            }
-            if (errorElement) {
-                SafeDOM.addClass(errorElement, 'hidden');
-            }
-        } catch (error) {
-            console.error('Error hiding form messages:', error);
+    },
+    
+    bindEvents: function() {
+        var self = this;
+        
+        // Weather functionality with enhanced event handling
+        var searchBtn = this.getElementById('searchBtn');
+        var cityInput = this.getElementById('cityInput');
+        var locationBtn = this.getElementById('locationBtn');
+        var retryBtn = this.getElementById('retryBtn');
+        
+        if (searchBtn) {
+            this.addEventListenerSafe(searchBtn, 'click', function(e) {
+                e.preventDefault();
+                self.handleSearch();
+            });
         }
-    }
-
-    showFormSuccess() {
-        try {
-            const successElement = SafeDOM.get('formSuccess');
-            const errorElement = SafeDOM.get('formError');
-            
-            if (errorElement) {
-                SafeDOM.addClass(errorElement, 'hidden');
-            }
-            
-            if (successElement) {
-                SafeDOM.removeClass(successElement, 'hidden');
-                // Scroll to success message
-                successElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-
-            // Auto-hide after 10 seconds
-            setTimeout(() => {
-                if (successElement) {
-                    SafeDOM.addClass(successElement, 'hidden');
+        
+        if (cityInput) {
+            this.addEventListenerSafe(cityInput, 'keypress', function(e) {
+                if (e.key === 'Enter' || e.keyCode === 13) {
+                    e.preventDefault();
+                    self.handleSearch();
                 }
-            }, 10000);
-        } catch (error) {
-            console.error('Error showing form success:', error);
+            });
+            
+            // Touch-friendly input handling
+            if (this.deviceInfo.hasTouch) {
+                this.addEventListenerSafe(cityInput, 'touchstart', function(e) {
+                    e.stopPropagation();
+                });
+            }
         }
-    }
-
-    showFormError(message) {
-        try {
-            const errorElement = SafeDOM.get('formError');
-            const errorMessage = SafeDOM.get('formErrorMessage');
-            const successElement = SafeDOM.get('formSuccess');
+        
+        if (locationBtn) {
+            this.addEventListenerSafe(locationBtn, 'click', function(e) {
+                e.preventDefault();
+                self.handleGeolocation();
+            });
+        }
+        
+        if (retryBtn) {
+            this.addEventListenerSafe(retryBtn, 'click', function(e) {
+                e.preventDefault();
+                self.loadDefaultWeather();
+            });
+        }
+        
+        // Navigation events with touch support
+        var hamburger = this.getElementById('hamburger');
+        var mobileMenuOverlay = this.getElementById('mobileMenuOverlay');
+        
+        if (hamburger) {
+            this.addEventListenerSafe(hamburger, 'click', function(e) {
+                e.preventDefault();
+                self.toggleMobileMenu();
+            });
             
-            if (successElement) {
-                SafeDOM.addClass(successElement, 'hidden');
-            }
-            
-            if (errorMessage) {
-                SafeDOM.setText(errorMessage, message);
-            }
-            if (errorElement) {
-                SafeDOM.removeClass(errorElement, 'hidden');
-                errorElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-
-            // Auto-hide after 8 seconds
-            setTimeout(() => {
-                if (errorElement) {
-                    SafeDOM.addClass(errorElement, 'hidden');
+            // Keyboard accessibility
+            this.addEventListenerSafe(hamburger, 'keydown', function(e) {
+                if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
+                    e.preventDefault();
+                    self.toggleMobileMenu();
                 }
-            }, 8000);
-        } catch (error) {
-            console.error('Error showing form error:', error);
+            });
         }
-    }
-
-    resetContactForm() {
-        try {
-            const form = SafeDOM.get('contactForm');
-            if (form) {
-                form.reset();
-                // Clear any field errors
-                ['name', 'email', 'message'].forEach(field => {
-                    this.clearFieldError(field);
-                    const fieldElement = SafeDOM.get(`contact${field.charAt(0).toUpperCase() + field.slice(1)}`);
-                    if (fieldElement) {
-                        fieldElement.style.borderColor = 'var(--color-border)';
+        
+        if (mobileMenuOverlay) {
+            this.addEventListenerSafe(mobileMenuOverlay, 'click', function(e) {
+                if (e.target === mobileMenuOverlay) {
+                    self.closeMobileMenu();
+                }
+            });
+            
+            // Touch events for mobile
+            if (this.deviceInfo.hasTouch) {
+                this.addEventListenerSafe(mobileMenuOverlay, 'touchend', function(e) {
+                    if (e.target === mobileMenuOverlay) {
+                        self.closeMobileMenu();
                     }
                 });
             }
-        } catch (error) {
-            console.error('Error resetting contact form:', error);
         }
-    }
-
-    // Enhanced Weather functionality
-    updateCurrentDate() {
-        try {
-            const currentDateElement = SafeDOM.get('currentDate');
-            if (currentDateElement) {
-                const now = new Date();
-                const options = { 
-                    weekday: 'long', 
-                    year: 'numeric', 
-                    month: 'long', 
-                    day: 'numeric' 
-                };
-                SafeDOM.setText(currentDateElement, now.toLocaleDateString('en-US', options));
+        
+        // Enhanced smooth scrolling for navigation links
+        var navLinks = document.querySelectorAll('a[href^="#"]');
+        for (var i = 0; i < navLinks.length; i++) {
+            (function(link) {
+                self.addEventListenerSafe(link, 'click', function(e) {
+                    e.preventDefault();
+                    var targetId = link.getAttribute('href').substring(1);
+                    var target = self.getElementById(targetId);
+                    if (target) {
+                        self.scrollToSection(target);
+                        self.closeMobileMenu();
+                    }
+                });
+            })(navLinks[i]);
+        }
+        
+        // Window events with throttling
+        this.addEventListenerSafe(window, 'scroll', this.throttle(function() {
+            self.updateActiveNav();
+        }, 100));
+        
+        this.addEventListenerSafe(window, 'resize', this.throttle(function() {
+            self.handleResize();
+        }, 250));
+        
+        // Network status monitoring
+        this.addEventListenerSafe(window, 'online', function() {
+            console.log('Network: Online');
+            if (self.weatherAI) {
+                self.weatherAI.isOnline = true;
             }
-        } catch (error) {
-            console.error('Error updating current date:', error);
+        });
+        
+        this.addEventListenerSafe(window, 'offline', function() {
+            console.log('Network: Offline');
+            if (self.weatherAI) {
+                self.weatherAI.isOnline = false;
+            }
+        });
+    },
+    
+    // Cross-browser event listener with fallback
+    addEventListenerSafe: function(element, event, handler) {
+        if (element.addEventListener) {
+            element.addEventListener(event, handler, false);
+        } else if (element.attachEvent) {
+            element.attachEvent('on' + event, handler);
         }
-    }
-
-    async loadDefaultWeather() {
+    },
+    
+    // Cross-browser getElementById with error handling
+    getElementById: function(id) {
         try {
-            await this.fetchWeatherByCity(this.defaultCity);
+            return document.getElementById(id);
         } catch (error) {
-            console.error('Error loading default weather:', error);
-            this.showError('Failed to load default weather data. Please try searching for a city.');
+            console.error('Element not found:', id);
+            return null;
         }
-    }
-
-    async handleSearch() {
-        try {
-            const cityInput = SafeDOM.get('cityInput');
-            const city = cityInput?.value?.trim();
+    },
+    
+    // Throttle function for performance
+    throttle: function(func, limit) {
+        var inThrottle;
+        return function() {
+            var args = arguments;
+            var context = this;
+            if (!inThrottle) {
+                func.apply(context, args);
+                inThrottle = true;
+                setTimeout(function() { inThrottle = false; }, limit);
+            }
+        };
+    },
+    
+    // Handle window resize for responsive adjustments
+    handleResize: function() {
+        var newDeviceType = DeviceCapabilities.getDeviceType();
+        if (newDeviceType !== this.deviceInfo.type) {
+            this.deviceInfo.type = newDeviceType;
+            this.optimizeForDevice();
+        }
+    },
+    
+    // Optimize performance based on device capabilities
+    optimizeForDevice: function() {
+        var body = document.body;
+        if (!body) return;
+        
+        // Remove existing device classes
+        body.className = body.className.replace(/\b(mobile|tablet|desktop|low-performance)\b/g, '');
+        
+        // Add current device class
+        body.className += ' ' + this.deviceInfo.type;
+        
+        // Add performance class for low-end devices
+        if (this.deviceInfo.performance.hardwareConcurrency <= 2 || this.deviceInfo.performance.deviceMemory <= 2) {
+            body.className += ' low-performance';
+        }
+        
+        // Optimize animations for low-performance devices
+        if (this.deviceInfo.performance.reducedMotion || this.deviceInfo.connection.effectiveType === '2g') {
+            body.className += ' reduce-animations';
+        }
+    },
+    
+    // Enhanced accessibility features
+    initAccessibilityFeatures: function() {
+        // Skip navigation link functionality
+        var skipLink = document.querySelector('.sr-only-focusable');
+        if (skipLink) {
+            this.addEventListenerSafe(skipLink, 'click', function(e) {
+                e.preventDefault();
+                var target = document.getElementById('main-content');
+                if (target) {
+                    target.focus();
+                    target.scrollIntoView();
+                }
+            });
+        }
+        
+        // Enhanced keyboard navigation
+        this.addEventListenerSafe(document, 'keydown', this.handleGlobalKeydown.bind(this));
+        
+        // Announce dynamic content changes
+        this.createAriaLiveRegion();
+    },
+    
+    createAriaLiveRegion: function() {
+        var liveRegion = document.createElement('div');
+        liveRegion.setAttribute('id', 'aria-live-region');
+        liveRegion.setAttribute('aria-live', 'polite');
+        liveRegion.setAttribute('aria-atomic', 'true');
+        liveRegion.style.position = 'absolute';
+        liveRegion.style.left = '-10000px';
+        liveRegion.style.width = '1px';
+        liveRegion.style.height = '1px';
+        liveRegion.style.overflow = 'hidden';
+        document.body.appendChild(liveRegion);
+    },
+    
+    announceToScreenReader: function(message) {
+        var liveRegion = this.getElementById('aria-live-region');
+        if (liveRegion) {
+            liveRegion.textContent = message;
+            setTimeout(function() {
+                liveRegion.textContent = '';
+            }, 1000);
+        }
+    },
+    
+    handleGlobalKeydown: function(e) {
+        // Escape key closes modals
+        if (e.key === 'Escape' || e.keyCode === 27) {
+            this.closeMobileMenu();
+            this.closeAIChat();
+        }
+    },
+    
+    // Performance optimizations
+    initPerformanceOptimizations: function() {
+        // Preload critical resources on fast connections
+        if (this.deviceInfo.connection.effectiveType === '4g' && !this.deviceInfo.connection.saveData) {
+            this.preloadCriticalResources();
+        }
+        
+        // Implement service worker for caching (if supported)
+        if ('serviceWorker' in navigator && window.location.protocol === 'https:') {
+            this.registerServiceWorker();
+        }
+    },
+    
+    preloadCriticalResources: function() {
+        // Preload weather API endpoint
+        var preloadLink = document.createElement('link');
+        preloadLink.rel = 'dns-prefetch';
+        preloadLink.href = this.baseUrl;
+        document.head.appendChild(preloadLink);
+    },
+    
+    registerServiceWorker: function() {
+        // Service worker registration would go here for offline support
+        // Simplified for demo - would implement full caching strategy in production
+        console.log('Service Worker registration would be implemented here for offline support');
+    },
+    
+    // AI Chat functionality with enhanced error handling
+    initAIChat: function() {
+        var self = this;
+        var aiChatBubble = this.getElementById('aiChatBubble');
+        var aiChatPanel = this.getElementById('aiChatPanel');
+        var aiChatClose = this.getElementById('aiChatClose');
+        var aiChatSend = this.getElementById('aiChatSend');
+        var aiChatInput = this.getElementById('aiChatInput');
+        
+        if (aiChatBubble) {
+            this.addEventListenerSafe(aiChatBubble, 'click', function(e) {
+                e.preventDefault();
+                self.toggleAIChat();
+            });
             
-            if (!city) {
-                this.showError('Please enter a city name');
-                return;
-            }
-
-            await this.fetchWeatherByCity(city);
-            if (cityInput) {
-                cityInput.value = '';
-            }
-        } catch (error) {
-            console.error('Error handling search:', error);
-            this.showError('An error occurred while searching. Please try again.');
+            this.addEventListenerSafe(aiChatBubble, 'keydown', function(e) {
+                if (e.key === 'Enter' || e.key === ' ' || e.keyCode === 13 || e.keyCode === 32) {
+                    e.preventDefault();
+                    self.toggleAIChat();
+                }
+            });
         }
-    }
-
-    async handleGeolocation() {
-        if (!navigator.geolocation) {
-            this.showError('Geolocation is not supported by this browser');
+        
+        if (aiChatClose) {
+            this.addEventListenerSafe(aiChatClose, 'click', function(e) {
+                e.preventDefault();
+                self.closeAIChat();
+            });
+        }
+        
+        if (aiChatSend) {
+            this.addEventListenerSafe(aiChatSend, 'click', function(e) {
+                e.preventDefault();
+                self.sendAIMessage();
+            });
+        }
+        
+        if (aiChatInput) {
+            this.addEventListenerSafe(aiChatInput, 'keypress', function(e) {
+                if (e.key === 'Enter' || e.keyCode === 13) {
+                    e.preventDefault();
+                    self.sendAIMessage();
+                }
+            });
+        }
+        
+        // Suggestion buttons
+        var suggestionButtons = document.querySelectorAll('.ai-suggestion-btn');
+        for (var i = 0; i < suggestionButtons.length; i++) {
+            (function(btn) {
+                self.addEventListenerSafe(btn, 'click', function(e) {
+                    e.preventDefault();
+                    var query = btn.getAttribute('data-query');
+                    self.handleSuggestionClick(query);
+                });
+            })(suggestionButtons[i]);
+        }
+    },
+    
+    toggleAIChat: function() {
+        var aiChatPanel = this.getElementById('aiChatPanel');
+        if (aiChatPanel) {
+            var isHidden = aiChatPanel.classList.contains('hidden');
+            if (isHidden) {
+                aiChatPanel.classList.remove('hidden');
+                aiChatPanel.setAttribute('aria-hidden', 'false');
+                var aiChatInput = this.getElementById('aiChatInput');
+                if (aiChatInput) {
+                    aiChatInput.focus();
+                }
+                this.announceToScreenReader('AI chat opened');
+            } else {
+                this.closeAIChat();
+            }
+        }
+    },
+    
+    closeAIChat: function() {
+        var aiChatPanel = this.getElementById('aiChatPanel');
+        if (aiChatPanel) {
+            aiChatPanel.classList.add('hidden');
+            aiChatPanel.setAttribute('aria-hidden', 'true');
+            this.announceToScreenReader('AI chat closed');
+        }
+    },
+    
+    sendAIMessage: function() {
+        var self = this;
+        var aiChatInput = this.getElementById('aiChatInput');
+        var message = aiChatInput && aiChatInput.value ? aiChatInput.value.trim() : '';
+        
+        if (!message) return;
+        
+        if (!this.weatherAI) {
+            this.addChatMessage("AI assistant is not available. Please refresh the page and try again.", 'ai');
             return;
         }
-
-        const locationBtn = SafeDOM.get('locationBtn');
+        
+        // Clear input
+        if (aiChatInput) {
+            aiChatInput.value = '';
+        }
+        
+        // Add user message to chat
+        this.addChatMessage(message, 'user');
+        
+        // Show typing indicator
+        this.showAITyping();
+        
+        // Get AI response with enhanced error handling
+        this.weatherAI.handleChatQuery(message)
+            .then(function(response) {
+                self.hideAITyping();
+                self.addChatMessage(response, 'ai');
+                self.announceToScreenReader('AI responded to your message');
+            })
+            .catch(function(error) {
+                console.error('AI chat error:', error);
+                self.hideAITyping();
+                self.addChatMessage("Sorry, I'm having trouble responding right now. Please try again!", 'ai');
+                self.announceToScreenReader('AI error occurred');
+            });
+    },
+    
+    handleSuggestionClick: function(query) {
+        var aiChatInput = this.getElementById('aiChatInput');
+        if (aiChatInput) {
+            aiChatInput.value = query;
+        }
+        this.sendAIMessage();
+    },
+    
+    addChatMessage: function(message, sender) {
+        var aiChatMessages = this.getElementById('aiChatMessages');
+        if (!aiChatMessages) return;
+        
+        var messageElement = document.createElement('div');
+        messageElement.className = sender === 'user' ? 'user-message' : 'ai-message';
+        messageElement.setAttribute('role', 'listitem');
+        
+        var avatar = document.createElement('div');
+        avatar.className = sender === 'user' ? 'user-avatar' : 'ai-avatar';
+        avatar.textContent = sender === 'user' ? '👤' : '🤖';
+        avatar.setAttribute('aria-hidden', 'true');
+        
+        var text = document.createElement('div');
+        text.className = sender === 'user' ? 'user-text' : 'ai-text';
+        text.innerHTML = message; // Using innerHTML to support formatting
+        
+        messageElement.appendChild(avatar);
+        messageElement.appendChild(text);
+        
+        aiChatMessages.appendChild(messageElement);
+        
+        // Scroll to bottom with smooth behavior if supported
+        if (aiChatMessages.scrollTo) {
+            aiChatMessages.scrollTo({
+                top: aiChatMessages.scrollHeight,
+                behavior: 'smooth'
+            });
+        } else {
+            aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+        }
+    },
+    
+    showAITyping: function() {
+        var aiChatMessages = this.getElementById('aiChatMessages');
+        if (!aiChatMessages) return;
+        
+        var typingElement = document.createElement('div');
+        typingElement.className = 'ai-message ai-typing-message';
+        typingElement.innerHTML = '<div class="ai-avatar" aria-hidden="true">🤖</div>' +
+                                 '<div class="ai-text ai-typing">' +
+                                 '<span>Thinking...</span>' +
+                                 '<div class="ai-typing-dots">' +
+                                 '<div class="ai-typing-dot"></div>' +
+                                 '<div class="ai-typing-dot"></div>' +
+                                 '<div class="ai-typing-dot"></div>' +
+                                 '</div>' +
+                                 '</div>';
+        
+        aiChatMessages.appendChild(typingElement);
+        if (aiChatMessages.scrollTo) {
+            aiChatMessages.scrollTo({
+                top: aiChatMessages.scrollHeight,
+                behavior: 'smooth'
+            });
+        } else {
+            aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+        }
+    },
+    
+    hideAITyping: function() {
+        var typingMessage = document.querySelector('.ai-typing-message');
+        if (typingMessage && typingMessage.parentNode) {
+            typingMessage.parentNode.removeChild(typingMessage);
+        }
+    },
+    
+    generateAIInsights: function(weatherData, forecastData) {
+        var self = this;
+        var aiInsightsCard = this.getElementById('aiInsightsCard');
+        var aiInsightsContent = this.getElementById('aiInsightsContent');
+        var aiInsightsLoading = this.getElementById('aiInsightsLoading');
+        
+        if (!aiInsightsCard || !aiInsightsContent) return;
+        
+        // Show the insights card and loading state
+        aiInsightsCard.classList.remove('hidden');
+        if (aiInsightsLoading) {
+            aiInsightsLoading.classList.remove('hidden');
+        }
+        
+        if (!this.weatherAI) {
+            if (aiInsightsLoading) {
+                aiInsightsLoading.classList.add('hidden');
+            }
+            aiInsightsContent.innerHTML = '<p>AI insights are not available at this time.</p>';
+            return Promise.resolve();
+        }
+        
+        return this.weatherAI.generateWeatherInsight(weatherData, forecastData)
+            .then(function(insights) {
+                if (aiInsightsLoading) {
+                    aiInsightsLoading.classList.add('hidden');
+                }
+                
+                var formattedInsights = insights.split('\n\n').map(function(insight) {
+                    return '<div class="ai-insight-item">' + insight.trim() + '</div>';
+                }).join('');
+                
+                aiInsightsContent.innerHTML = formattedInsights;
+                self.announceToScreenReader('AI weather insights loaded');
+            })
+            .catch(function(error) {
+                console.error('Error generating AI insights:', error);
+                if (aiInsightsLoading) {
+                    aiInsightsLoading.classList.add('hidden');
+                }
+                aiInsightsContent.innerHTML = '<p>Unable to generate insights at this time. Please try again later.</p>';
+            });
+    },
+    
+    // Navigation functionality with enhanced accessibility
+    initNavigation: function() {
+        this.updateActiveNav();
+    },
+    
+    toggleMobileMenu: function() {
+        var hamburger = this.getElementById('hamburger');
+        var mobileMenuOverlay = this.getElementById('mobileMenuOverlay');
+        
+        if (hamburger && mobileMenuOverlay) {
+            var isActive = hamburger.classList.contains('active');
+            
+            if (isActive) {
+                this.closeMobileMenu();
+            } else {
+                hamburger.classList.add('active');
+                hamburger.setAttribute('aria-expanded', 'true');
+                mobileMenuOverlay.classList.add('active');
+                mobileMenuOverlay.classList.remove('hidden');
+                mobileMenuOverlay.setAttribute('aria-hidden', 'false');
+                
+                // Focus management
+                var firstLink = mobileMenuOverlay.querySelector('.mobile-nav-link');
+                if (firstLink) {
+                    firstLink.focus();
+                }
+                
+                // Prevent body scroll when menu is open
+                document.body.style.overflow = 'hidden';
+                this.announceToScreenReader('Navigation menu opened');
+            }
+        }
+    },
+    
+    closeMobileMenu: function() {
+        var hamburger = this.getElementById('hamburger');
+        var mobileMenuOverlay = this.getElementById('mobileMenuOverlay');
+        
+        if (hamburger && mobileMenuOverlay) {
+            hamburger.classList.remove('active');
+            hamburger.setAttribute('aria-expanded', 'false');
+            mobileMenuOverlay.classList.remove('active');
+            mobileMenuOverlay.classList.add('hidden');
+            mobileMenuOverlay.setAttribute('aria-hidden', 'true');
+            document.body.style.overflow = '';
+            this.announceToScreenReader('Navigation menu closed');
+        }
+    },
+    
+    scrollToSection: function(target) {
+        var navbarHeight = this.deviceInfo.type === 'mobile' ? 55 : 60;
+        var targetPosition = target.offsetTop - navbarHeight;
+        
+        // Smooth scroll with fallback for older browsers
+        if (window.scrollTo && window.scrollTo.length > 1) {
+            try {
+                window.scrollTo({
+                    top: targetPosition,
+                    behavior: 'smooth'
+                });
+            } catch (e) {
+                window.scrollTo(0, targetPosition);
+            }
+        } else {
+            window.scrollTo(0, targetPosition);
+        }
+    },
+    
+    updateActiveNav: function() {
+        var sections = document.querySelectorAll('.section');
+        var navLinks = document.querySelectorAll('.nav-link');
+        var navbarHeight = this.deviceInfo.type === 'mobile' ? 55 : 60;
+        
+        var currentSection = '';
+        
+        for (var i = 0; i < sections.length; i++) {
+            var section = sections[i];
+            var sectionTop = section.offsetTop - navbarHeight - 100;
+            var sectionBottom = sectionTop + section.offsetHeight;
+            
+            if (window.scrollY >= sectionTop && window.scrollY < sectionBottom) {
+                currentSection = section.getAttribute('id');
+                break;
+            }
+        }
+        
+        for (var j = 0; j < navLinks.length; j++) {
+            var link = navLinks[j];
+            link.classList.remove('active');
+            if (link.getAttribute('href') === '#' + currentSection) {
+                link.classList.add('active');
+            }
+        }
+    },
+    
+    // Contact form functionality with enhanced validation
+    initContactForm: function() {
+        var self = this;
+        var contactForm = this.getElementById('contactForm');
+        
+        if (contactForm) {
+            this.addEventListenerSafe(contactForm, 'submit', function(e) {
+                self.handleContactSubmit(e);
+            });
+        }
+        
+        // Real-time validation with accessibility
+        var nameInput = this.getElementById('contactName');
+        var emailInput = this.getElementById('contactEmail');
+        var messageInput = this.getElementById('contactMessage');
+        
+        if (nameInput) {
+            this.addEventListenerSafe(nameInput, 'blur', function() { self.validateField('name'); });
+            this.addEventListenerSafe(nameInput, 'input', function() { self.clearFieldError('name'); });
+        }
+        
+        if (emailInput) {
+            this.addEventListenerSafe(emailInput, 'blur', function() { self.validateField('email'); });
+            this.addEventListenerSafe(emailInput, 'input', function() { self.clearFieldError('email'); });
+        }
+        
+        if (messageInput) {
+            this.addEventListenerSafe(messageInput, 'blur', function() { self.validateField('message'); });
+            this.addEventListenerSafe(messageInput, 'input', function() { self.clearFieldError('message'); });
+        }
+    },
+    
+    validateField: function(fieldName) {
+        var field = this.getElementById('contact' + fieldName.charAt(0).toUpperCase() + fieldName.slice(1));
+        var errorElement = this.getElementById(fieldName + 'Error');
+        
+        if (!field || !errorElement) return true;
+        
+        var isValid = true;
+        var errorMessage = '';
+        var value = field.value ? field.value.trim() : '';
+        
+        switch (fieldName) {
+            case 'name':
+                if (!value) {
+                    isValid = false;
+                    errorMessage = 'Name is required';
+                } else if (value.length < 2) {
+                    isValid = false;
+                    errorMessage = 'Name must be at least 2 characters';
+                }
+                break;
+            
+            case 'email':
+                var emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                if (!value) {
+                    isValid = false;
+                    errorMessage = 'Email is required';
+                } else if (!emailRegex.test(value)) {
+                    isValid = false;
+                    errorMessage = 'Please enter a valid email address';
+                }
+                break;
+            
+            case 'message':
+                if (!value) {
+                    isValid = false;
+                    errorMessage = 'Message is required';
+                } else if (value.length < 10) {
+                    isValid = false;
+                    errorMessage = 'Message must be at least 10 characters';
+                }
+                break;
+        }
+        
+        if (!isValid) {
+            this.showFieldError(fieldName, errorMessage);
+            field.style.borderColor = 'var(--color-error)';
+            field.setAttribute('aria-invalid', 'true');
+        } else {
+            this.clearFieldError(fieldName);
+            field.style.borderColor = 'var(--color-border)';
+            field.setAttribute('aria-invalid', 'false');
+        }
+        
+        return isValid;
+    },
+    
+    showFieldError: function(fieldName, message) {
+        var errorElement = this.getElementById(fieldName + 'Error');
+        if (errorElement) {
+            errorElement.textContent = message;
+            errorElement.classList.add('show');
+        }
+    },
+    
+    clearFieldError: function(fieldName) {
+        var errorElement = this.getElementById(fieldName + 'Error');
+        if (errorElement) {
+            errorElement.classList.remove('show');
+        }
+    },
+    
+    handleContactSubmit: function(e) {
+        e.preventDefault();
+        
+        var self = this;
+        
+        // Hide previous messages
+        this.hideFormMessages();
+        
+        // Validate all fields
+        var nameValid = this.validateField('name');
+        var emailValid = this.validateField('email');
+        var messageValid = this.validateField('message');
+        
+        if (!nameValid || !emailValid || !messageValid) {
+            this.showFormError('Please fix the errors above');
+            this.announceToScreenReader('Form has validation errors');
+            return;
+        }
+        
+        var submitBtn = this.getElementById('submitBtn');
+        var originalText = submitBtn ? submitBtn.textContent : 'Send Message';
         
         try {
-            if (locationBtn) {
-                locationBtn.disabled = true;
-                SafeDOM.setHTML(locationBtn, '<span class="location-icon">📍</span> Getting Location...');
+            // Show loading state
+            if (submitBtn) {
+                submitBtn.disabled = true;
+                submitBtn.textContent = 'Sending...';
             }
-
-            this.showLoading();
-
-            const position = await this.getCurrentPosition();
-            const { latitude, longitude } = position.coords;
-            await this.fetchWeatherByCoords(latitude, longitude);
+            
+            // Simulate form submission
+            this.simulateFormSubmission()
+                .then(function() {
+                    self.showFormSuccess();
+                    self.resetContactForm();
+                    self.announceToScreenReader('Message sent successfully');
+                })
+                .catch(function(error) {
+                    self.showFormError('Failed to send message. Please try again.');
+                    self.announceToScreenReader('Failed to send message');
+                })
+                .finally(function() {
+                    if (submitBtn) {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = originalText;
+                    }
+                });
+                
         } catch (error) {
-            let message = 'Unable to retrieve your location';
-            if (error.code) {
+            this.showFormError('Failed to send message. Please try again.');
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.textContent = originalText;
+            }
+        }
+    },
+    
+    simulateFormSubmission: function() {
+        // Simulate API delay based on connection speed
+        var delay = this.deviceInfo.connection.effectiveType === '2g' ? 3000 : 1500;
+        
+        return new Promise(function(resolve) {
+            setTimeout(resolve, delay);
+        });
+    },
+    
+    hideFormMessages: function() {
+        var successElement = this.getElementById('formSuccess');
+        var errorElement = this.getElementById('formError');
+        
+        if (successElement) {
+            successElement.classList.add('hidden');
+        }
+        if (errorElement) {
+            errorElement.classList.add('hidden');
+        }
+    },
+    
+    showFormSuccess: function() {
+        var successElement = this.getElementById('formSuccess');
+        var errorElement = this.getElementById('formError');
+        
+        if (errorElement) {
+            errorElement.classList.add('hidden');
+        }
+        
+        if (successElement) {
+            successElement.classList.remove('hidden');
+            
+            // Scroll to success message to ensure it's visible
+            if (successElement.scrollIntoView) {
+                successElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+        
+        // Auto-hide after 10 seconds
+        var self = this;
+        setTimeout(function() {
+            if (successElement) {
+                successElement.classList.add('hidden');
+            }
+        }, 10000);
+    },
+    
+    showFormError: function(message) {
+        var errorElement = this.getElementById('formError');
+        var errorMessage = this.getElementById('formErrorMessage');
+        var successElement = this.getElementById('formSuccess');
+        
+        if (successElement) {
+            successElement.classList.add('hidden');
+        }
+        
+        if (errorMessage) {
+            errorMessage.textContent = message;
+        }
+        if (errorElement) {
+            errorElement.classList.remove('hidden');
+            
+            // Scroll to error message to ensure it's visible
+            if (errorElement.scrollIntoView) {
+                errorElement.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+        
+        // Auto-hide after 8 seconds
+        var self = this;
+        setTimeout(function() {
+            if (errorElement) {
+                errorElement.classList.add('hidden');
+            }
+        }, 8000);
+    },
+    
+    resetContactForm: function() {
+        var form = this.getElementById('contactForm');
+        if (form && form.reset) {
+            form.reset();
+            
+            // Clear any field errors
+            var fields = ['name', 'email', 'message'];
+            for (var i = 0; i < fields.length; i++) {
+                this.clearFieldError(fields[i]);
+                var fieldElement = this.getElementById('contact' + fields[i].charAt(0).toUpperCase() + fields[i].slice(1));
+                if (fieldElement) {
+                    fieldElement.style.borderColor = 'var(--color-border)';
+                    fieldElement.setAttribute('aria-invalid', 'false');
+                }
+            }
+        }
+    },
+    
+    // Weather functionality with enhanced error handling and performance
+    updateCurrentDate: function() {
+        var currentDateElement = this.getElementById('currentDate');
+        if (currentDateElement) {
+            var now = new Date();
+            var options = { 
+                weekday: 'long', 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            };
+            
+            try {
+                var dateString = now.toLocaleDateString('en-US', options);
+                currentDateElement.textContent = dateString;
+                currentDateElement.setAttribute('datetime', now.toISOString());
+            } catch (error) {
+                // Fallback for older browsers
+                currentDateElement.textContent = now.toString();
+            }
+        }
+    },
+    
+    loadDefaultWeather: function() {
+        return this.fetchWeatherByCity('London');
+    },
+    
+    handleSearch: function() {
+        var cityInput = this.getElementById('cityInput');
+        var city = cityInput && cityInput.value ? cityInput.value.trim() : '';
+        
+        if (!city) {
+            this.showError('Please enter a city name');
+            this.announceToScreenReader('Please enter a city name');
+            return;
+        }
+        
+        this.fetchWeatherByCity(city);
+        if (cityInput) {
+            cityInput.value = '';
+        }
+    },
+    
+    handleGeolocation: function() {
+        var self = this;
+        
+        if (!navigator.geolocation) {
+            this.showError('Geolocation is not supported by this browser');
+            this.announceToScreenReader('Geolocation not supported');
+            return;
+        }
+        
+        var locationBtn = this.getElementById('locationBtn');
+        if (locationBtn) {
+            locationBtn.disabled = true;
+            var btnText = locationBtn.querySelector('.btn-text');
+            if (btnText) {
+                btnText.textContent = 'Getting Location...';
+            }
+        }
+        
+        this.showLoading();
+        this.announceToScreenReader('Getting your location');
+        
+        this.getCurrentPosition()
+            .then(function(position) {
+                var coords = position.coords;
+                return self.fetchWeatherByCoords(coords.latitude, coords.longitude);
+            })
+            .catch(function(error) {
+                var message = 'Unable to retrieve your location';
                 switch (error.code) {
-                    case error.PERMISSION_DENIED:
+                    case 1: // PERMISSION_DENIED
                         message = 'Location access denied by user';
                         break;
-                    case error.POSITION_UNAVAILABLE:
+                    case 2: // POSITION_UNAVAILABLE
                         message = 'Location information unavailable';
                         break;
-                    case error.TIMEOUT:
+                    case 3: // TIMEOUT
                         message = 'Location request timed out';
                         break;
                     default:
                         message = 'Failed to get your location';
                         break;
                 }
-            }
-            this.showError(message);
-        } finally {
-            if (locationBtn) {
-                locationBtn.disabled = false;
-                SafeDOM.setHTML(locationBtn, '<span class="location-icon">📍</span> Use My Location');
-            }
-        }
-    }
-
-    getCurrentPosition() {
-        return new Promise((resolve, reject) => {
+                self.showError(message);
+                self.announceToScreenReader(message);
+            })
+            .finally(function() {
+                if (locationBtn) {
+                    locationBtn.disabled = false;
+                    var btnText = locationBtn.querySelector('.btn-text');
+                    if (btnText) {
+                        btnText.textContent = 'Use My Location';
+                    }
+                }
+            });
+    },
+    
+    getCurrentPosition: function() {
+        var self = this;
+        return new Promise(function(resolve, reject) {
             navigator.geolocation.getCurrentPosition(resolve, reject, {
                 enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 600000
+                timeout: 15000, // Increased timeout for slower devices
+                maximumAge: 600000 // 10 minutes
             });
         });
-    }
-
-    async fetchWeatherByCity(city) {
+    },
+    
+    fetchWeatherByCity: function(city) {
+        var self = this;
         this.showLoading();
         
-        const searchBtn = SafeDOM.get('searchBtn');
+        var searchBtn = this.getElementById('searchBtn');
+        if (searchBtn) {
+            searchBtn.disabled = true;
+        }
         
-        try {
-            if (searchBtn) {
-                searchBtn.disabled = true;
-            }
+        var currentWeatherUrl = this.baseUrl + '/weather?q=' + encodeURIComponent(city) + '&appid=' + this.apiKey + '&units=metric';
+        var forecastUrl = this.baseUrl + '/forecast?q=' + encodeURIComponent(city) + '&appid=' + this.apiKey + '&units=metric';
+        
+        return Promise.all([
+            fetch(currentWeatherUrl),
+            fetch(forecastUrl)
+        ])
+        .then(function(responses) {
+            var currentResponse = responses[0];
+            var forecastResponse = responses[1];
             
-            const currentWeatherUrl = `${this.baseUrl}/weather?q=${encodeURIComponent(city)}&appid=${this.apiKey}&units=metric`;
-            const forecastUrl = `${this.baseUrl}/forecast?q=${encodeURIComponent(city)}&appid=${this.apiKey}&units=metric`;
-
-            const [currentResponse, forecastResponse] = await Promise.all([
-                fetch(currentWeatherUrl),
-                fetch(forecastUrl)
-            ]);
-
             if (!currentResponse.ok) {
                 if (currentResponse.status === 404) {
-                    throw new Error(`City "${city}" not found. Please check the spelling and try again.`);
+                    throw new Error('City "' + city + '" not found. Please check the spelling and try again.');
                 } else if (currentResponse.status === 401) {
                     throw new Error('API key invalid. Please check your API configuration.');
                 } else {
-                    throw new Error(`Failed to fetch weather data (Status: ${currentResponse.status})`);
+                    throw new Error('Failed to fetch weather data (Status: ' + currentResponse.status + ')');
                 }
             }
-
+            
             if (!forecastResponse.ok) {
                 throw new Error('Failed to fetch forecast data');
             }
-
-            const currentData = await currentResponse.json();
-            const forecastData = await forecastResponse.json();
-
-            // Store data
-            this.currentWeatherData = currentData;
-            this.currentForecastData = forecastData;
-
-            this.displayWeatherData(currentData, forecastData);
-            this.updateBackgroundByWeather(currentData.weather[0].main);
             
-            // Generate AI insights
-            await this.generateAIInsights(currentData, forecastData);
+            return Promise.all([
+                currentResponse.json(),
+                forecastResponse.json()
+            ]);
+        })
+        .then(function(data) {
+            var currentData = data[0];
+            var forecastData = data[1];
             
-        } catch (error) {
+            // Store data for AI
+            self.currentWeatherData = currentData;
+            self.currentForecastData = forecastData;
+            
+            self.displayWeatherData(currentData, forecastData);
+            self.updateBackgroundByWeather(currentData.weather[0].main);
+            self.announceToScreenReader('Weather data loaded for ' + currentData.name);
+            
+            // Generate AI insights after displaying weather data
+            return self.generateAIInsights(currentData, forecastData);
+        })
+        .catch(function(error) {
             console.error('Error fetching weather:', error);
-            this.showError(error.message || 'Failed to fetch weather data. Please try again.');
-        } finally {
+            var errorMessage = error.message || 'Failed to fetch weather data. Please try again.';
+            self.showError(errorMessage);
+            self.announceToScreenReader('Error: ' + errorMessage);
+        })
+        .finally(function() {
             if (searchBtn) {
                 searchBtn.disabled = false;
             }
-        }
-    }
-
-    async fetchWeatherByCoords(lat, lon) {
+        });
+    },
+    
+    fetchWeatherByCoords: function(lat, lon) {
+        var self = this;
         this.showLoading();
         
-        try {
-            const currentWeatherUrl = `${this.baseUrl}/weather?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric`;
-            const forecastUrl = `${this.baseUrl}/forecast?lat=${lat}&lon=${lon}&appid=${this.apiKey}&units=metric`;
-
-            const [currentResponse, forecastResponse] = await Promise.all([
-                fetch(currentWeatherUrl),
-                fetch(forecastUrl)
-            ]);
-
+        var currentWeatherUrl = this.baseUrl + '/weather?lat=' + lat + '&lon=' + lon + '&appid=' + this.apiKey + '&units=metric';
+        var forecastUrl = this.baseUrl + '/forecast?lat=' + lat + '&lon=' + lon + '&appid=' + this.apiKey + '&units=metric';
+        
+        return Promise.all([
+            fetch(currentWeatherUrl),
+            fetch(forecastUrl)
+        ])
+        .then(function(responses) {
+            var currentResponse = responses[0];
+            var forecastResponse = responses[1];
+            
             if (!currentResponse.ok) {
                 throw new Error('Failed to fetch weather data for your location');
             }
-
+            
             if (!forecastResponse.ok) {
                 throw new Error('Failed to fetch forecast data for your location');
             }
-
-            const currentData = await currentResponse.json();
-            const forecastData = await forecastResponse.json();
-
-            // Store data
-            this.currentWeatherData = currentData;
-            this.currentForecastData = forecastData;
-
-            this.displayWeatherData(currentData, forecastData);
-            this.updateBackgroundByWeather(currentData.weather[0].main);
             
-            // Generate AI insights
-            await this.generateAIInsights(currentData, forecastData);
+            return Promise.all([
+                currentResponse.json(),
+                forecastResponse.json()
+            ]);
+        })
+        .then(function(data) {
+            var currentData = data[0];
+            var forecastData = data[1];
             
-        } catch (error) {
+            // Store data for AI
+            self.currentWeatherData = currentData;
+            self.currentForecastData = forecastData;
+            
+            self.displayWeatherData(currentData, forecastData);
+            self.updateBackgroundByWeather(currentData.weather[0].main);
+            self.announceToScreenReader('Weather data loaded for your location');
+            
+            // Generate AI insights after displaying weather data
+            return self.generateAIInsights(currentData, forecastData);
+        })
+        .catch(function(error) {
             console.error('Error fetching weather:', error);
-            this.showError(error.message || 'Failed to fetch weather data for your location');
-        }
-    }
-
-    displayWeatherData(currentData, forecastData) {
+            var errorMessage = error.message || 'Failed to fetch weather data for your location';
+            self.showError(errorMessage);
+            self.announceToScreenReader('Error: ' + errorMessage);
+        });
+    },
+    
+    displayWeatherData: function(currentData, forecastData) {
         try {
-            // Update current weather with safe DOM manipulation
-            SafeDOM.setText(SafeDOM.get('currentLocation'), `${currentData.name}, ${currentData.sys.country}`);
-            SafeDOM.setText(SafeDOM.get('currentTemp'), Math.round(currentData.main.temp));
-            SafeDOM.setText(SafeDOM.get('weatherDescription'), currentData.weather[0].description);
-            SafeDOM.setText(SafeDOM.get('feelsLike'), Math.round(currentData.main.feels_like));
-
-            // Update weather icon
-            const iconCode = currentData.weather[0].icon;
-            SafeDOM.setText(SafeDOM.get('weatherIconLarge'), this.weatherIcons[iconCode] || '🌤️');
-
-            // Update weather details
-            SafeDOM.setText(SafeDOM.get('humidity'), `${currentData.main.humidity}%`);
-            SafeDOM.setText(SafeDOM.get('windSpeed'), `${Math.round(currentData.wind?.speed * 3.6 || 0)} km/h`);
-            SafeDOM.setText(SafeDOM.get('pressure'), `${currentData.main.pressure} hPa`);
-            SafeDOM.setText(SafeDOM.get('visibility'), `${Math.round((currentData.visibility || 10000) / 1000)} km`);
-
-            // Update sun times
-            const sunrise = new Date(currentData.sys.sunrise * 1000);
-            const sunset = new Date(currentData.sys.sunset * 1000);
+            console.log('Displaying weather data for:', currentData);
             
-            SafeDOM.setText(SafeDOM.get('sunrise'), sunrise.toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit', 
-                hour12: true 
-            }));
-            SafeDOM.setText(SafeDOM.get('sunset'), sunset.toLocaleTimeString('en-US', { 
-                hour: '2-digit', 
-                minute: '2-digit', 
-                hour12: true 
-            }));
-
-            // Update forecast
+            // Update current weather - FIXED: Ensure location is properly updated
+            var locationElement = this.getElementById('currentLocation');
+            if (locationElement && currentData && currentData.name && currentData.sys && currentData.sys.country) {
+                var locationText = currentData.name + ', ' + currentData.sys.country;
+                locationElement.textContent = locationText;
+                console.log('Updated location display to:', locationText);
+            } else {
+                console.error('Location element or data missing:', {
+                    locationElement: !!locationElement,
+                    currentData: !!currentData,
+                    name: currentData ? currentData.name : 'missing',
+                    sys: currentData ? currentData.sys : 'missing'
+                });
+            }
+            
+            var tempElement = this.getElementById('currentTemp');
+            if (tempElement && currentData && currentData.main) {
+                var temperature = Math.round(currentData.main.temp);
+                tempElement.textContent = temperature;
+                tempElement.setAttribute('aria-label', temperature + ' degrees Celsius');
+            }
+            
+            var descElement = this.getElementById('weatherDescription');
+            if (descElement && currentData && currentData.weather && currentData.weather[0]) {
+                descElement.textContent = currentData.weather[0].description;
+            }
+            
+            var feelsLikeElement = this.getElementById('feelsLike');
+            if (feelsLikeElement && currentData && currentData.main) {
+                feelsLikeElement.textContent = Math.round(currentData.main.feels_like);
+            }
+            
+            // Update weather icon
+            if (currentData && currentData.weather && currentData.weather[0]) {
+                var iconCode = currentData.weather[0].icon;
+                var iconElement = this.getElementById('weatherIconLarge');
+                if (iconElement) {
+                    var icon = this.weatherIcons[iconCode] || '🌤️';
+                    iconElement.textContent = icon;
+                    iconElement.setAttribute('aria-label', 'Weather condition: ' + currentData.weather[0].description);
+                }
+            }
+            
+            // Update weather details with accessibility labels
+            if (currentData && currentData.main) {
+                this.updateDetailElement('humidity', currentData.main.humidity + '%', 'Humidity ' + currentData.main.humidity + ' percent');
+                this.updateDetailElement('windSpeed', Math.round((currentData.wind && currentData.wind.speed ? currentData.wind.speed : 0) * 3.6) + ' km/h', 'Wind speed ' + Math.round((currentData.wind && currentData.wind.speed ? currentData.wind.speed : 0) * 3.6) + ' kilometers per hour');
+                this.updateDetailElement('pressure', currentData.main.pressure + ' hPa', 'Atmospheric pressure ' + currentData.main.pressure + ' hectopascals');
+                this.updateDetailElement('visibility', Math.round(((currentData.visibility || 10000) / 1000)) + ' km', 'Visibility ' + Math.round(((currentData.visibility || 10000) / 1000)) + ' kilometers');
+            }
+            
+            // Update sun times
+            if (currentData && currentData.sys) {
+                var sunrise = new Date(currentData.sys.sunrise * 1000);
+                var sunset = new Date(currentData.sys.sunset * 1000);
+                
+                this.updateTimeElement('sunrise', sunrise);
+                this.updateTimeElement('sunset', sunset);
+            }
+            
+            // Update 5-day forecast
             this.displayForecast(forecastData);
-
+            
             // Show weather content
             this.showWeatherContent();
             
@@ -1264,233 +1760,230 @@ class WeatherPro {
             console.error('Error displaying weather data:', error);
             this.showError('Failed to display weather data');
         }
-    }
-
-    displayForecast(forecastData) {
+    },
+    
+    updateDetailElement: function(elementId, textContent, ariaLabel) {
+        var element = this.getElementById(elementId);
+        if (element) {
+            element.textContent = textContent;
+            if (ariaLabel) {
+                element.setAttribute('aria-label', ariaLabel);
+            }
+        }
+    },
+    
+    updateTimeElement: function(elementId, dateTime) {
+        var element = this.getElementById(elementId);
+        if (element) {
+            try {
+                var timeString = dateTime.toLocaleTimeString('en-US', { 
+                    hour: '2-digit', 
+                    minute: '2-digit', 
+                    hour12: true 
+                });
+                element.textContent = timeString;
+                element.setAttribute('datetime', dateTime.toISOString());
+            } catch (error) {
+                // Fallback for older browsers
+                element.textContent = dateTime.getHours() + ':' + 
+                                    (dateTime.getMinutes() < 10 ? '0' : '') + 
+                                    dateTime.getMinutes();
+            }
+        }
+    },
+    
+    displayForecast: function(forecastData) {
+        var forecastContainer = this.getElementById('forecastContainer');
+        if (!forecastContainer) {
+            console.error('Forecast container not found');
+            return;
+        }
+        
+        // Clear existing content
+        forecastContainer.innerHTML = '';
+        
         try {
-            const forecastContainer = SafeDOM.get('forecastContainer');
-            if (!forecastContainer) {
-                console.error('Forecast container not found');
-                return;
-            }
-
-            // Clear existing content
-            forecastContainer.innerHTML = '';
-
-            if (!forecastData || !forecastData.list) {
-                SafeDOM.setHTML(forecastContainer, '<p style="color: rgba(255, 255, 255, 0.8); text-align: center;">No forecast data available</p>');
-                return;
-            }
-
             // Group forecast data by day
-            const dailyForecasts = {};
+            var dailyForecasts = {};
             
-            forecastData.list.forEach(item => {
-                try {
-                    const date = new Date(item.dt * 1000);
-                    const dateKey = date.toDateString();
-                    
-                    // Take the forecast closest to noon for each day
-                    if (!dailyForecasts[dateKey] || 
-                        Math.abs(date.getHours() - 12) < Math.abs(new Date(dailyForecasts[dateKey].dt * 1000).getHours() - 12)) {
-                        dailyForecasts[dateKey] = item;
-                    }
-                } catch (error) {
-                    console.warn('Error processing forecast item:', error);
+            for (var i = 0; i < forecastData.list.length; i++) {
+                var item = forecastData.list[i];
+                var date = new Date(item.dt * 1000);
+                var dateKey = date.toDateString();
+                
+                // Take the forecast closest to noon for each day
+                if (!dailyForecasts[dateKey] || 
+                    Math.abs(date.getHours() - 12) < Math.abs(new Date(dailyForecasts[dateKey].dt * 1000).getHours() - 12)) {
+                    dailyForecasts[dateKey] = item;
                 }
-            });
-
+            }
+            
             // Get first 5 days
-            const forecasts = Object.values(dailyForecasts).slice(0, 5);
+            var forecasts = [];
+            for (var key in dailyForecasts) {
+                forecasts.push(dailyForecasts[key]);
+                if (forecasts.length >= 5) break;
+            }
+            
+            console.log('Creating ' + forecasts.length + ' forecast cards');
             
             if (forecasts.length === 0) {
-                SafeDOM.setHTML(forecastContainer, '<p style="color: rgba(255, 255, 255, 0.8); text-align: center;">No forecast data available</p>');
+                forecastContainer.innerHTML = '<p style="color: rgba(255, 255, 255, 0.8); text-align: center;">No forecast data available</p>';
                 return;
             }
-
-            forecasts.forEach((forecast, index) => {
-                try {
-                    const forecastCard = document.createElement('div');
-                    forecastCard.className = 'forecast-card';
-
-                    const date = new Date(forecast.dt * 1000);
-                    const dateStr = index === 0 ? 'Today' : date.toLocaleDateString('en-US', { 
-                        weekday: 'short', 
-                        month: 'short', 
-                        day: 'numeric' 
-                    });
-
-                    const iconCode = forecast.weather[0].icon;
-                    const icon = this.weatherIcons[iconCode] || '🌤️';
-                    const description = forecast.weather[0].description;
-                    const highTemp = Math.round(forecast.main.temp_max);
-                    const lowTemp = Math.round(forecast.main.temp_min);
-
-                    forecastCard.innerHTML = `
-                        <p class="forecast-date">${dateStr}</p>
-                        <div class="forecast-icon">${icon}</div>
-                        <div class="forecast-temps">
-                            <span class="forecast-high">${highTemp}°</span>
-                            <span class="forecast-low">${lowTemp}°</span>
-                        </div>
-                        <p class="forecast-desc">${description}</p>
-                    `;
-
-                    forecastContainer.appendChild(forecastCard);
-                } catch (error) {
-                    console.warn('Error creating forecast card:', error);
-                }
-            });
+            
+            for (var j = 0; j < forecasts.length; j++) {
+                var forecast = forecasts[j];
+                var forecastCard = document.createElement('div');
+                forecastCard.className = 'forecast-card';
+                forecastCard.setAttribute('role', 'listitem');
+                
+                var date = new Date(forecast.dt * 1000);
+                var dateStr = j === 0 ? 'Today' : this.formatForecastDate(date);
+                
+                var iconCode = forecast.weather[0].icon;
+                var icon = this.weatherIcons[iconCode] || '🌤️';
+                var description = forecast.weather[0].description;
+                var highTemp = Math.round(forecast.main.temp_max);
+                var lowTemp = Math.round(forecast.main.temp_min);
+                
+                forecastCard.innerHTML = 
+                    '<p class="forecast-date">' + dateStr + '</p>' +
+                    '<div class="forecast-icon" aria-label="' + description + '">' + icon + '</div>' +
+                    '<div class="forecast-temps">' +
+                    '<span class="forecast-high" aria-label="High ' + highTemp + ' degrees">' + highTemp + '°</span>' +
+                    '<span class="forecast-low" aria-label="Low ' + lowTemp + ' degrees">' + lowTemp + '°</span>' +
+                    '</div>' +
+                    '<p class="forecast-desc">' + description + '</p>';
+                
+                forecastContainer.appendChild(forecastCard);
+            }
             
         } catch (error) {
             console.error('Error displaying forecast:', error);
-            const forecastContainer = SafeDOM.get('forecastContainer');
-            if (forecastContainer) {
-                SafeDOM.setHTML(forecastContainer, '<p style="color: rgba(255, 255, 255, 0.8); text-align: center;">Unable to load forecast data</p>');
-            }
+            forecastContainer.innerHTML = '<p style="color: rgba(255, 255, 255, 0.8); text-align: center;">Unable to load forecast data</p>';
         }
-    }
-
-    updateBackgroundByWeather(weatherMain) {
+    },
+    
+    formatForecastDate: function(date) {
         try {
-            const weatherBackground = SafeDOM.query('.weather-background');
-            if (!weatherBackground) return;
-            
-            // Remove existing weather classes
-            weatherBackground.className = 'weather-background';
-            
-            // Add weather-specific class
-            switch (weatherMain.toLowerCase()) {
-                case 'clear':
-                    SafeDOM.addClass(weatherBackground, 'sunny');
-                    break;
-                case 'clouds':
-                    SafeDOM.addClass(weatherBackground, 'cloudy');
-                    break;
-                case 'rain':
-                case 'drizzle':
-                case 'thunderstorm':
-                    SafeDOM.addClass(weatherBackground, 'rainy');
-                    break;
-                case 'snow':
-                    SafeDOM.addClass(weatherBackground, 'snowy');
-                    break;
-                default:
-                    // Keep default gradient
-                    break;
-            }
+            return date.toLocaleDateString('en-US', { 
+                weekday: 'short', 
+                month: 'short', 
+                day: 'numeric' 
+            });
         } catch (error) {
-            console.error('Error updating background:', error);
+            // Fallback for older browsers
+            var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+            var months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            return days[date.getDay()] + ' ' + months[date.getMonth()] + ' ' + date.getDate();
         }
-    }
-
-    showLoading() {
-        try {
-            const loadingState = SafeDOM.get('loadingState');
-            const errorState = SafeDOM.get('errorState');
-            const weatherContent = SafeDOM.get('weatherContent');
-            
-            if (loadingState) SafeDOM.removeClass(loadingState, 'hidden');
-            if (errorState) SafeDOM.addClass(errorState, 'hidden');
-            if (weatherContent) SafeDOM.addClass(weatherContent, 'hidden');
-        } catch (error) {
-            console.error('Error showing loading state:', error);
-        }
-    }
-
-    showError(message) {
-        try {
-            const errorMessage = SafeDOM.get('errorMessage');
-            const errorState = SafeDOM.get('errorState');
-            const loadingState = SafeDOM.get('loadingState');
-            const weatherContent = SafeDOM.get('weatherContent');
-            
-            if (errorMessage) SafeDOM.setText(errorMessage, message);
-            if (errorState) SafeDOM.removeClass(errorState, 'hidden');
-            if (loadingState) SafeDOM.addClass(loadingState, 'hidden');
-            if (weatherContent) SafeDOM.addClass(weatherContent, 'hidden');
-            
-            console.error('Weather App Error:', message);
-        } catch (error) {
-            console.error('Error showing error state:', error);
-        }
-    }
-
-    clearError() {
-        try {
-            const errorState = SafeDOM.get('errorState');
-            if (errorState) {
-                SafeDOM.addClass(errorState, 'hidden');
-            }
-        } catch (error) {
-            console.error('Error clearing error state:', error);
-        }
-    }
-
-    showWeatherContent() {
-        try {
-            const weatherContent = SafeDOM.get('weatherContent');
-            const loadingState = SafeDOM.get('loadingState');
-            const errorState = SafeDOM.get('errorState');
-            
-            if (weatherContent) SafeDOM.removeClass(weatherContent, 'hidden');
-            if (loadingState) SafeDOM.addClass(loadingState, 'hidden');
-            if (errorState) SafeDOM.addClass(errorState, 'hidden');
-        } catch (error) {
-            console.error('Error showing weather content:', error);
-        }
-    }
-}
-
-// Initialize the app when DOM is loaded with enhanced error handling
-document.addEventListener('DOMContentLoaded', () => {
-    try {
-        // Global error handler for uncaught errors
-        window.addEventListener('error', (e) => {
-            console.error('Global error caught:', e.error);
-        });
-
-        // Global handler for unhandled promise rejections
-        window.addEventListener('unhandledrejection', (e) => {
-            console.error('Unhandled promise rejection:', e.reason);
-        });
-
-        const app = new WeatherPro();
+    },
+    
+    updateBackgroundByWeather: function(weatherMain) {
+        var weatherBackground = document.querySelector('.weather-background');
+        if (!weatherBackground) return;
         
-        // Make app globally accessible for debugging
-        if (typeof window !== 'undefined') {
-            window.WeatherProApp = app;
+        // Remove existing weather classes
+        weatherBackground.className = 'weather-background';
+        
+        // Add weather-specific class
+        switch (weatherMain.toLowerCase()) {
+            case 'clear':
+                weatherBackground.classList.add('sunny');
+                break;
+            case 'clouds':
+                weatherBackground.classList.add('cloudy');
+                break;
+            case 'rain':
+            case 'drizzle':
+            case 'thunderstorm':
+                weatherBackground.classList.add('rainy');
+                break;
+            case 'snow':
+                weatherBackground.classList.add('snowy');
+                break;
+            default:
+                // Keep default gradient
+                break;
         }
+    },
+    
+    showLoading: function() {
+        var loadingState = this.getElementById('loadingState');
+        var errorState = this.getElementById('errorState');
+        var weatherContent = this.getElementById('weatherContent');
         
-        console.log('WeatherPro with AI and enhanced error handling initialized successfully');
-    } catch (error) {
-        console.error('Critical error during WeatherPro initialization:', error);
+        if (loadingState) loadingState.classList.remove('hidden');
+        if (errorState) errorState.classList.add('hidden');
+        if (weatherContent) weatherContent.classList.add('hidden');
+    },
+    
+    showError: function(message) {
+        var errorMessage = this.getElementById('errorMessage');
+        var errorState = this.getElementById('errorState');
+        var loadingState = this.getElementById('loadingState');
+        var weatherContent = this.getElementById('weatherContent');
         
-        // Show fallback error message to user
-        const body = document.body;
-        if (body) {
-            const errorDiv = document.createElement('div');
-            errorDiv.style.cssText = `
-                position: fixed; 
-                top: 20px; 
-                left: 50%; 
-                transform: translateX(-50%); 
-                background: #ff4444; 
-                color: white; 
-                padding: 15px 20px; 
-                border-radius: 8px; 
-                z-index: 9999;
-                font-family: Arial, sans-serif;
-            `;
-            errorDiv.textContent = 'Weather app failed to load. Please refresh the page.';
-            body.appendChild(errorDiv);
+        if (errorMessage) errorMessage.textContent = message;
+        if (errorState) errorState.classList.remove('hidden');
+        if (loadingState) loadingState.classList.add('hidden');
+        if (weatherContent) weatherContent.classList.add('hidden');
+        
+        console.error('Weather App Error:', message);
+    },
+    
+    showWeatherContent: function() {
+        var weatherContent = this.getElementById('weatherContent');
+        var loadingState = this.getElementById('loadingState');
+        var errorState = this.getElementById('errorState');
+        
+        if (weatherContent) weatherContent.classList.remove('hidden');
+        if (loadingState) loadingState.classList.add('hidden');
+        if (errorState) errorState.classList.add('hidden');
+    }
+};
+
+// Initialize the app with enhanced error handling and compatibility
+(function() {
+    'use strict';
+    
+    function initializeWeatherPro() {
+        try {
+            window.weatherProInstance = new WeatherPro();
+            console.log('WeatherPro with AI initialized successfully for universal device compatibility');
+        } catch (error) {
+            console.error('Failed to initialize WeatherPro:', error);
             
-            // Auto-remove after 5 seconds
-            setTimeout(() => {
-                if (errorDiv.parentNode) {
-                    errorDiv.parentNode.removeChild(errorDiv);
+            // Fallback error display
+            var errorContainer = document.createElement('div');
+            errorContainer.style.cssText = 'position: fixed; top: 20px; left: 20px; right: 20px; background: #f44336; color: white; padding: 15px; border-radius: 8px; z-index: 9999; text-align: center;';
+            errorContainer.innerHTML = '<strong>Application Error:</strong> Failed to initialize WeatherPro. Please refresh the page.';
+            document.body.appendChild(errorContainer);
+            
+            setTimeout(function() {
+                if (errorContainer.parentNode) {
+                    errorContainer.parentNode.removeChild(errorContainer);
                 }
             }, 5000);
         }
     }
-});
+    
+    // Enhanced DOM ready detection for maximum compatibility
+    if (document.readyState === 'loading') {
+        if (document.addEventListener) {
+            document.addEventListener('DOMContentLoaded', initializeWeatherPro, false);
+        } else if (document.attachEvent) {
+            document.attachEvent('onreadystatechange', function() {
+                if (document.readyState === 'complete') {
+                    initializeWeatherPro();
+                }
+            });
+        } else {
+            // Fallback for very old browsers
+            window.onload = initializeWeatherPro;
+        }
+    } else {
+        initializeWeatherPro();
+    }
+})();
