@@ -838,7 +838,7 @@ class WeatherPro {
     }
 
     async loadDefaultWeather() {
-        await this.fetchWeatherByCity('London');
+        await this.fetchWeatherByCity('krishnagiri');
     }
 
     async handleSearch() {
